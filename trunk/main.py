@@ -219,7 +219,7 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(3)
+      return self.js.get_axis(2)
 
   def get_fy(self):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
@@ -232,7 +232,7 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(2)
+      return self.js.get_axis(3)
 
 
 
@@ -241,7 +241,7 @@ def empty(l):
   ind.reverse()
   for i in ind: del l[i]
 
-size = width,height = 800,600
+size = width,height = 480,320
 def run():
   pygame.init()
   screen = pygame.display.set_mode(size)
@@ -260,9 +260,9 @@ def run():
   gameover_pos = (width - gameover_pos[0]) / 2, \
                  (height - gameover_pos[1]) / 2
   winner_font = pygame.font.SysFont('arial', 18, bold = True)
-  winner_pos = gameover_font.size('WINNER')
-  winner_pos = (width - gameover_pos[0]) / 2, \
-               (height - gameover_pos[1]) / 2
+  winner_pos = winner_font.size('WINNER')
+  winner_pos = (width - winner_pos[0]) / 2, \
+               (height - winner_pos[1]) / 2
 
   user_input = Input()
   bullets = []
@@ -273,7 +273,7 @@ def run():
                    SpawnPoint(screen, width - dw,          dh, baddies),
                    SpawnPoint(screen, width - dw, height - dh, baddies) ]
   score = 0
-  max_ships = 500
+  max_ships = 100
   num_ships_spawned = 0
   winner = False
 
