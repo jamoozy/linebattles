@@ -4,7 +4,15 @@ import math
 import time
 import random
 random.seed(time.time())
+
+from OpenGL.GL import *
+from OpenGL.GLU import *
+
 import pygame
+from pygame.locals import *
+
+
+
 
 class Ship(object):
   '''This class is used for drawing, mainly.  Just pass it some points and
@@ -167,10 +175,77 @@ class SpawnPoint(object):
     self.pos = [x,y]
     self.baddies = baddies_array
     self.traj = math.atan2(height / 2 - y, width / 2 - x)
+    self.queue = []
 
-  def spawn(self):
-    self.baddies.append(Baddie(self.screen, self.pos, self.traj))
+  def spawn(self, baddie_type = Baddie):
+    self.baddies.append(baddie_type(self.screen, self.pos, self.traj))
 
+  def queue_spawn(self, baddie_type):
+    self.queue.append(baddie_type)
+
+  def tick(self):
+    if len(self.queue) > 0 and random.randrange(100) < 5:
+      self.spawn(self.queue[0])
+      del self.queue[0]
+
+  def draw(self):
+    pass
+
+  def clear(self):
+    self.queue = []
+
+
+
+class Level(object):
+  def __init__(self, screen, spawn_point_array, greeting, progression):
+    '''Creates a level.
+    screen: SDL surface to draw to
+    spawn_point_array: the spawn points
+    greeting: the string to display when the level starts
+    progression: The progression of the level.  Expected is a list of
+                 4-tuples, where each tuple is:
+                   1: pause time before wave start
+                   2: index of spawn point to spawn at.
+                   3: type of baddie to spawn
+                   4: number of baddies to spawn'''
+    global width,height
+
+    self.screen = screen
+    self.spawns = spawn_point_array
+
+    self.font = pygame.font.SysFont("courier", 30, bold = True)
+    self.greeting = greeting
+    w,h = self.font.size(self.greeting)
+    self.greeting_pos = (width - w) / 2, (height - h) / 2
+
+    self.progression = progression
+    self.prog_i = 0
+
+  def start(self):
+    self.prog_i = 0
+    self.start_time = pygame.time.get_ticks()
+
+  def _p(self):
+    if self.prog_i < len(self.progression):
+      return self.progression[self.prog_i]
+    else:
+      return (9e9999,-1,None,0)
+
+  def tick(self):
+    # Check/spawn queue
+    if self.prog_i < len(self.progression):
+      while self._p()[0] <= pygame.time.get_ticks() - self.start_time:
+        for i in xrange(self._p()[3]):
+          self.spawns[self._p()[1]].queue_spawn(self._p()[2])
+        self.prog_i += 1
+
+  def draw(self):
+    if self.prog_i == 0:
+      self.screen.blit(self.font.render(self.greeting, False,
+              (255,255,255)), self.greeting_pos)
+
+  def done(self):
+    return self.prog_i >= len(self.progression)
 
 
 class Input(object):
@@ -236,6 +311,12 @@ class Input(object):
 
 
 
+def spawn_points_empty(sps):
+  for sp in sps:
+    if len(sp.queue) != 0:
+      return False
+  return True
+
 def empty(l):
   ind = range(len(l))
   ind.reverse()
@@ -244,7 +325,7 @@ def empty(l):
 size = width,height = 480,320
 def run():
   pygame.init()
-  screen = pygame.display.set_mode(size)
+  screen = pygame.display.set_mode(size, HWSURFACE | DOUBLEBUF)
 
   ship = Player.spawn_at(screen, width/2, height/2)
   speed = 2
@@ -273,14 +354,33 @@ def run():
                    SpawnPoint(screen, width - dw,          dh, baddies),
                    SpawnPoint(screen, width - dw, height - dh, baddies) ]
   score = 0
-  max_ships = 100
-  num_ships_spawned = 0
+  #max_ships = 100
+  #num_ships_spawned = 0
   winner = False
+
+  l = 0
+  levels = [ Level(screen, spawn_points, "Level 1",
+                   [ (2000, 0, Baddie, 20),
+                     (2000, 1, Baddie, 20),
+                     (2000, 2, Baddie, 20),
+                     (2000, 3, Baddie, 20) ]),
+             Level(screen, spawn_points, "Level 2",
+                   [ (2000, 0, Baddie, 200),
+                     (2000, 1, Baddie, 200),
+                     (2000, 2, Baddie, 200),
+                     (2000, 3, Baddie, 200) ]),
+             Level(screen, spawn_points, "Level 3",
+                   [ (2000, 0, Baddie, 2000),
+                     (2000, 1, Baddie, 2000),
+                     (2000, 2, Baddie, 2000),
+                     (2000, 3, Baddie, 2000) ]) ]
 
 
   ######################################################################
   #                              Main Loop                             #
   ######################################################################
+
+  levels[l].start()
 
   while True:
     fps_timer.tick(60)
@@ -309,12 +409,15 @@ def run():
     # Movement
     if ship.exploding:
       if ship.expl_prog >= 30:
+        for s in spawn_points: s.clear()
         del ship
         ship = Player.spawn_at(screen, width/2, height/2)
         empty(bullets)
         empty(baddies)
         score = 0
         num_ships_spawned = 0
+        levels[0].start()
+        l = 0
     else:
       js_dx = user_input.get_mx()
       js_dy = user_input.get_my()
@@ -350,19 +453,40 @@ def run():
           ship.move(0,-1)
 
 
-      if num_ships_spawned < max_ships:
-        if random.randrange(100) < 5:
-          for s in spawn_points:
-            s.spawn()
-            num_ships_spawned += 1
-      elif len(baddies) <= 0:
+      #if num_ships_spawned < max_ships:
+      #  if random.randrange(100) < 5:
+      #    for s in spawn_points:
+      #      s.spawn()
+      #      num_ships_spawned += 1
+      #elif len(baddies) <= 0:
+      #  winner = True
+
+    ####################################################################
+    #                        Level Progression                         #
+    ####################################################################
+
+    if l < len(levels) and levels[l].done() and \
+            spawn_points_empty(spawn_points) and len(baddies) == 0:
+      l += 1
+      if l < len(levels):
+        levels[l].start()
+      else:
         winner = True
+    else:
+      levels[l].tick()
+    for s in spawn_points:
+      s.tick()
 
     ####################################################################
     #                         Drawing Process                          #
     ####################################################################
 
     screen.fill(black)
+
+    for s in spawn_points: s.draw()
+
+    if l < len(levels):
+      levels[l].draw()
 
     # draw the bullets or delete them if they've gone off screen
     indecies = range(len(bullets))
