@@ -169,12 +169,11 @@ class Baddie(Ship):
 
 
 class SpawnPoint(object):
-  def __init__(self, screen, x, y, baddies_array):
-    global width,height
+  def __init__(self, screen, size, x, y, baddies_array):
     self.screen = screen
     self.pos = [x,y]
     self.baddies = baddies_array
-    self.traj = math.atan2(height / 2 - y, width / 2 - x)
+    self.traj = math.atan2(size[0] / 2 - y, size[1] / 2 - x)
     self.queue = []
 
   def spawn(self, baddie_type = Baddie):
@@ -197,7 +196,7 @@ class SpawnPoint(object):
 
 
 class Level(object):
-  def __init__(self, screen, spawn_point_array, greeting, progression):
+  def __init__(self, screen, size, spawn_point_array, greeting, progression):
     '''Creates a level.
     screen: SDL surface to draw to
     spawn_point_array: the spawn points
@@ -208,15 +207,13 @@ class Level(object):
                    2: index of spawn point to spawn at.
                    3: type of baddie to spawn
                    4: number of baddies to spawn'''
-    global width,height
-
     self.screen = screen
     self.spawns = spawn_point_array
 
     self.font = pygame.font.SysFont("courier", 30, bold = True)
     self.greeting = greeting
     w,h = self.font.size(self.greeting)
-    self.greeting_pos = (width - w) / 2, (height - h) / 2
+    self.greeting_pos = (size[0] - w) / 2, (size[1] - h) / 2
 
     self.progression = progression
     self.prog_i = 0
@@ -294,7 +291,7 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(2)
+      return self.js.get_axis(3)
 
   def get_fy(self):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
@@ -307,247 +304,242 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(3)
+      return self.js.get_axis(2)
 
 
+class Main(object):
+  def __init__(self):
+    pygame.init()
+    self.size = self.width, self.height = 800, 600
+    self.screen = pygame.display.set_mode(self.size, HWSURFACE | DOUBLEBUF)
 
-def spawn_points_empty(sps):
-  for sp in sps:
-    if len(sp.queue) != 0:
-      return False
-  return True
+    self.ship = Player.spawn_at(self.screen, self.width/2, self.height/2)
+    self.speed = 2
+    self.black = (0,0,0)
 
-def empty(l):
-  ind = range(len(l))
-  ind.reverse()
-  for i in ind: del l[i]
+    self.fps_timer = pygame.time.Clock()
 
-size = width,height = 480,320
-def run():
-  pygame.init()
-  screen = pygame.display.set_mode(size, HWSURFACE | DOUBLEBUF)
+    # fonts
+    self.score_font = pygame.font.SysFont('courier', 25, bold = True)
+    self.debug_font = pygame.font.SysFont('arial', 8)
+    self.gameover_font = pygame.font.SysFont('arial', 18, bold = True)
+    self.gameover_pos = self.gameover_font.size('GAME OVER')
+    self.gameover_pos = (self.width - self.gameover_pos[0]) / 2, \
+                        (self.height - self.gameover_pos[1]) / 2
+    self.winner_font = pygame.font.SysFont('arial', 18, bold = True)
+    self.winner_pos = self.winner_font.size('WINNER')
+    self.winner_pos = (self.width - self.winner_pos[0]) / 2, \
+                      (self.height - self.winner_pos[1]) / 2
 
-  ship = Player.spawn_at(screen, width/2, height/2)
-  speed = 2
-  black = (0,0,0)
+    self.user_input = Input()
+    self.bullets = []
+    self.baddies = []
+    dw, dh = .1 * self.width, .1 * self.height
+    self.spawn_points = [
+        SpawnPoint(self.screen, self.size,              dw,               dh, self.baddies),
+        SpawnPoint(self.screen, self.size,              dw, self.height - dh, self.baddies),
+        SpawnPoint(self.screen, self.size, self.width - dw,               dh, self.baddies),
+        SpawnPoint(self.screen, self.size, self.width - dw, self.height - dh, self.baddies) ]
+    self.score = 0
+    self.winner = False
 
-  fps_timer = pygame.time.Clock()
+    self.lev_i = 0
+    self.levels = [ Level(self.screen, self.size, self.spawn_points, "Level 1",
+                          [ (2000, 0, Baddie, 20),
+                            (2000, 1, Baddie, 20),
+                            (2000, 2, Baddie, 20),
+                            (2000, 3, Baddie, 20) ]),
+                    Level(self.screen, self.size, self.spawn_points, "Level 2",
+                          [ (2000, 0, Baddie, 200),
+                            (2000, 1, Baddie, 200),
+                            (2000, 2, Baddie, 200),
+                            (2000, 3, Baddie, 200) ]),
+                    Level(self.screen, self.size, self.spawn_points, "Level 3",
+                          [ (2000, 0, Baddie, 2000),
+                            (2000, 1, Baddie, 2000),
+                            (2000, 2, Baddie, 2000),
+                            (2000, 3, Baddie, 2000) ]) ]
 
-  # fonts
-  score_font = pygame.font.SysFont('courier', 25, bold = True)
-  debug_font = pygame.font.SysFont('arial', 8)
-  gameover_font = pygame.font.SysFont('arial', 18, bold = True)
-  gameover_pos = gameover_font.size('GAME OVER')
-  gameover_pos = (width - gameover_pos[0]) / 2, \
-                 (height - gameover_pos[1]) / 2
-  winner_font = pygame.font.SysFont('arial', 18, bold = True)
-  winner_pos = winner_font.size('WINNER')
-  winner_pos = (width - winner_pos[0]) / 2, \
-               (height - winner_pos[1]) / 2
+  def spawn_points_empty(self):
+    for sp in self.spawn_points:
+      if len(sp.queue) != 0:
+        return False
+    return True
 
-  user_input = Input()
-  bullets = []
-  baddies = []
-  dw, dh = .1 * width, .1 * height
-  spawn_points = [ SpawnPoint(screen,         dw,          dh, baddies),
-                   SpawnPoint(screen,         dw, height - dh, baddies),
-                   SpawnPoint(screen, width - dw,          dh, baddies),
-                   SpawnPoint(screen, width - dw, height - dh, baddies) ]
-  score = 0
-  #max_ships = 100
-  #num_ships_spawned = 0
-  winner = False
+  def empty_list(self, l):
+    while 0 < len(l): del l[0]
+    #ind = range(len(l))
+    #ind.reverse()
+    #for i in ind: del l[i]
 
-  l = 0
-  levels = [ Level(screen, spawn_points, "Level 1",
-                   [ (2000, 0, Baddie, 20),
-                     (2000, 1, Baddie, 20),
-                     (2000, 2, Baddie, 20),
-                     (2000, 3, Baddie, 20) ]),
-             Level(screen, spawn_points, "Level 2",
-                   [ (2000, 0, Baddie, 200),
-                     (2000, 1, Baddie, 200),
-                     (2000, 2, Baddie, 200),
-                     (2000, 3, Baddie, 200) ]),
-             Level(screen, spawn_points, "Level 3",
-                   [ (2000, 0, Baddie, 2000),
-                     (2000, 1, Baddie, 2000),
-                     (2000, 2, Baddie, 2000),
-                     (2000, 3, Baddie, 2000) ]) ]
-
-
-  ######################################################################
-  #                              Main Loop                             #
-  ######################################################################
-
-  levels[l].start()
-
-  while True:
-    fps_timer.tick(60)
+  def empty_lists(self):
+    self.empty_list(self.bullets)
+    self.empty_list(self.baddies)
 
 
-    ####################################################################
-    #                            User Input                            #
-    ####################################################################
+  def run(self):
 
-    # Quitting and special keys.
-    for event in pygame.event.get([pygame.QUIT, pygame.KEYUP]):
-      if event.type == pygame.QUIT:
-        sys.exit()
-      if event.type == pygame.KEYUP and \
-        (event.key == pygame.K_q or event.key == pygame.K_w) and \
-        (event.mod == pygame.K_RCTRL or event.mod == pygame.K_LCTRL):
-        sys.exit()
-      if event.type == pygame.KEYUP and event.key == pygame.K_F7:
-        spawn_points[random.randrange(len(spawn_points))].spawn()
-      if event.type == pygame.KEYUP and event.key == pygame.K_F6:
-        print 'stats:'
-        print '  Num Baddies:', len(baddies)
-        print '  Num Bullets:', len(bullets)
-    pygame.event.clear()
+    ######################################################################
+    #                              Main Loop                             #
+    ######################################################################
 
-    # Movement
-    if ship.exploding:
-      if ship.expl_prog >= 30:
-        for s in spawn_points: s.clear()
-        del ship
-        ship = Player.spawn_at(screen, width/2, height/2)
-        empty(bullets)
-        empty(baddies)
-        score = 0
-        num_ships_spawned = 0
-        levels[0].start()
-        l = 0
-    else:
-      js_dx = user_input.get_mx()
-      js_dy = user_input.get_my()
-      ship.traj = math.atan2(js_dy, js_dx)
-      if abs(js_dx) > .1 or abs(js_dy) > .1:
-        amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
-        if amt > 1:
-          amt = 1.
-        elif amt < -1:
-          amt = -1.
-        ship.move_forward(speed * amt)
+    self.levels[self.lev_i].start()
 
-      # Fire
-      js_fx = user_input.get_fx()
-      js_fy = user_input.get_fy()
-      if abs(js_fx) > .1 or abs(js_fy) > .1:
-        bullet = ship.fire(math.atan2(js_fy, js_fx))
-        if bullet is not None:
-          bullets.append(bullet)
+    while True:
+      self.fps_timer.tick(60)
 
 
-      ##################################################################
-      #                      Collision Detection                       #
-      ##################################################################
+      ####################################################################
+      #                            User Input                            #
+      ####################################################################
 
-      while ship._build_rect().left <= 0:
-        ship.move(1,0)
-      while ship._build_rect().right >= width:
-        ship.move(-1,0)
-      while ship._build_rect().top <= 0:
-        ship.move(0,1)
-      while ship._build_rect().bottom >= height:
-          ship.move(0,-1)
+      # Quitting and special keys.
+      for event in pygame.event.get([pygame.QUIT, pygame.KEYUP]):
+        if event.type == pygame.QUIT:
+          sys.exit()
+        if event.type == pygame.KEYUP and \
+          (event.key == pygame.K_q or event.key == pygame.K_w) and \
+          (event.mod == pygame.K_RCTRL or event.mod == pygame.K_LCTRL):
+          sys.exit()
+        if event.type == pygame.KEYUP and event.key == pygame.K_F7:
+          self.spawn_points[random.randrange(len(self.spawn_points))].spawn()
+        if event.type == pygame.KEYUP and event.key == pygame.K_F6:
+          print 'stats:'
+          print '  Num Baddies:', len(self.baddies)
+          print '  Num Bullets:', len(self.bullets)
+      pygame.event.clear()
 
-
-      #if num_ships_spawned < max_ships:
-      #  if random.randrange(100) < 5:
-      #    for s in spawn_points:
-      #      s.spawn()
-      #      num_ships_spawned += 1
-      #elif len(baddies) <= 0:
-      #  winner = True
-
-    ####################################################################
-    #                        Level Progression                         #
-    ####################################################################
-
-    if l < len(levels) and levels[l].done() and \
-            spawn_points_empty(spawn_points) and len(baddies) == 0:
-      l += 1
-      if l < len(levels):
-        levels[l].start()
+      # Movement
+      if self.ship.exploding:
+        # explode and restart
+        if self.ship.expl_prog >= 30:
+          for s in self.spawn_points: s.clear()
+          del self.ship
+          self.ship = Player.spawn_at(self.screen, self.width / 2, self.height / 2)
+          self.empty_lists()
+          self.score = 0
+          self.levels[self.lev_i].start()
       else:
-        winner = True
-    else:
-      levels[l].tick()
-    for s in spawn_points:
-      s.tick()
+        js_dx = self.user_input.get_mx()
+        js_dy = self.user_input.get_my()
+        self.ship.traj = math.atan2(js_dy, js_dx)
+        if abs(js_dx) > .1 or abs(js_dy) > .1:
+          amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
+          if amt > 1:
+            amt = 1.
+          elif amt < -1:
+            amt = -1.
+          self.ship.move_forward(self.speed * amt)
 
-    ####################################################################
-    #                         Drawing Process                          #
-    ####################################################################
+        # Fire
+        js_fx = self.user_input.get_fx()
+        js_fy = self.user_input.get_fy()
+        if abs(js_fx) > .1 or abs(js_fy) > .1:
+          bullet = self.ship.fire(math.atan2(js_fy, js_fx))
+          if bullet is not None:
+            self.bullets.append(bullet)
 
-    screen.fill(black)
 
-    for s in spawn_points: s.draw()
+        ##################################################################
+        #                      Collision Detection                       #
+        ##################################################################
 
-    if l < len(levels):
-      levels[l].draw()
+        while self.ship._build_rect().left <= 0:
+          self.ship.move(1,0)
+        while self.ship._build_rect().right >= self.width:
+          self.ship.move(-1,0)
+        while self.ship._build_rect().top <= 0:
+          self.ship.move(0,1)
+        while self.ship._build_rect().bottom >= self.height:
+          self.ship.move(0,-1)
 
-    # draw the bullets or delete them if they've gone off screen
-    indecies = range(len(bullets))
-    indecies.reverse()
-    for i in indecies:  # reverse search, because we're deleting elements
-      bullets[i].move_forward()
-      if bullets[i].pos[0] <= 0 or bullets[i].pos[0] >= width or \
-         bullets[i].pos[1] <= 0 or bullets[i].pos[1] >= height:
-        del bullets[i]
+      ####################################################################
+      #                        Level Progression                         #
+      ####################################################################
+
+      if self.lev_i < len(self.levels) and self.levels[self.lev_i].done() and \
+              self.spawn_points_empty() and len(self.baddies) == 0:
+        self.lev_i += 1
+        if self.lev_i < len(self.levels):
+          self.levels[self.lev_i].start()
+        else:
+          winner = True
       else:
-        bullets[i].draw()
+        self.levels[self.lev_i].tick()
+      for s in self.spawn_points:
+        s.tick()
 
-    # draw the baddies or delete baddie/bullet on collision
-    indecies = range(len(baddies))
-    indecies.reverse()
-    for i in indecies:
-      baddies[i].tick()
-      rect = baddies[i]._build_rect()
-      remove_me = False
+      ####################################################################
+      #                         Drawing Process                          #
+      ####################################################################
 
-      for j in xrange(len(bullets)):
-        if rect.collidepoint(bullets[j].pos):
-          remove_me = True
-          del bullets[j]
-          score += 100
-          break
+      self.screen.fill(self.black)
 
-      if remove_me:
-        del baddies[i]
-      else:
-        if rect.left <= 0 or rect.right >= width:
-          baddies[i].traj = math.pi - baddies[i].traj
-          while baddies[i]._build_rect().left <= 0:
-            baddies[i].move(1,0)
-          while baddies[i]._build_rect().right >= width:
-            baddies[i].move(-1,0)
+      for s in self.spawn_points: s.draw()
 
-        if rect.top <= 0 or rect.bottom >= height:
-          baddies[i].traj = -baddies[i].traj
-          while baddies[i]._build_rect().top <= 0:
-            baddies[i].move(0,1)
-          while baddies[i]._build_rect().bottom >= height:
-            baddies[i].move(0,-1)
+      if self.lev_i < len(self.levels):
+        self.levels[self.lev_i].draw()
 
-        baddies[i].draw()
-        if not ship.exploding:
-          if rect.colliderect(ship._build_rect()):
-            ship.explode()
+      # draw the bullets or delete them if they've gone off screen
+      indecies = range(len(self.bullets))
+      indecies.reverse()
+      for i in indecies:  # reverse search, because we're deleting elements
+        self.bullets[i].move_forward()
+        if self.bullets[i].pos[0] <= 0 or self.bullets[i].pos[0] >= self.width or \
+           self.bullets[i].pos[1] <= 0 or self.bullets[i].pos[1] >= self.height:
+          del self.bullets[i]
+        else:
+          self.bullets[i].draw()
 
-    
-    if winner:
-      screen.blit(winner_font.render("WINNER", False,
-        (255,255,255)), winner_pos)
-    if ship.exploding:
-      screen.blit(gameover_font.render("GAME OVER", False,
-        (255,255,255)), gameover_pos)
-    screen.blit(score_font.render('%d' % score, False,
-        (255,255,255)), (20,20))
+      # draw the baddies or delete baddie/bullet on collision
+      indecies = range(len(self.baddies))
+      indecies.reverse()
+      for i in indecies:
+        self.baddies[i].tick()
+        rect = self.baddies[i]._build_rect()
+        remove_me = False
 
-    ship.draw()
-    pygame.display.flip()
+        for j in xrange(len(self.bullets)):
+          if rect.collidepoint(self.bullets[j].pos):
+            remove_me = True
+            del self.bullets[j]
+            self.score += 100
+            break
+
+        if remove_me:
+          del self.baddies[i]
+        else:
+          if rect.left <= 0 or rect.right >= self.width:
+            self.baddies[i].traj = math.pi - self.baddies[i].traj
+            while self.baddies[i]._build_rect().left <= 0:
+              self.baddies[i].move(1,0)
+            while self.baddies[i]._build_rect().right >= self.width:
+              self.baddies[i].move(-1,0)
+
+          if rect.top <= 0 or rect.bottom >= self.height:
+            self.baddies[i].traj = -self.baddies[i].traj
+            while self.baddies[i]._build_rect().top <= 0:
+              self.baddies[i].move(0,1)
+            while self.baddies[i]._build_rect().bottom >= self.height:
+              self.baddies[i].move(0,-1)
+
+          self.baddies[i].draw()
+          if not self.ship.exploding:
+            if rect.colliderect(self.ship._build_rect()):
+              self.ship.explode()
+
+      
+      if self.winner:
+        self.screen.blit(winner_font.render("WINNER", False,
+          (255,255,255)), self.winner_pos)
+      if self.ship.exploding:
+        self.screen.blit(self.gameover_font.render("GAME OVER", False,
+          (255,255,255)), self.gameover_pos)
+      self.screen.blit(self.score_font.render('%d' % self.score, False,
+          (255,255,255)), (10,10))
+
+      self.ship.draw()
+      pygame.display.flip()
 
 if __name__ == '__main__':
-  run()
+  Main().run()
