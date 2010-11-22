@@ -5,8 +5,8 @@ import time
 import random
 random.seed(time.time())
 
-from OpenGL.GL import *
-from OpenGL.GLU import *
+#from OpenGL.GL import *
+#from OpenGL.GLU import *
 
 import pygame
 from pygame.locals import *
