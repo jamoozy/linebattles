@@ -162,6 +162,9 @@ class Bullet(object):
     pygame.draw.line(self.screen, self.color,
                      self.pos, self._calc_tail_pos(), 2)
 
+  def tick(self):
+    self.move_forward()
+
   def move_forward(self):
     shift = self._calc_shift()
     self.pos[0] += shift[0]
@@ -238,7 +241,7 @@ class SpawnPoint(object):
     self.queue.append(baddie_type)
 
   def tick(self):
-    if len(self.queue) > 0 and random.randrange(100) < 5:
+    if len(self.queue) > 0 and random.randrange(100) < 20:
       self.spawn(self.queue[0])
       del self.queue[0]
 
@@ -351,7 +354,7 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(3)
+      return self.js.get_axis(2)
 
   def get_fy(self):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
@@ -364,7 +367,114 @@ class Input(object):
       else:
         return .0
     else:
-      return self.js.get_axis(2)
+      return self.js.get_axis(3)
+
+
+
+class CollisionSpace(object):
+  BINSIZE = 50
+  BUFSIZE = .1
+
+  def __init__(self, size, player):
+    self.size = size
+    self.player = player
+    self.cols = size[0] / self.BINSIZE
+    self.rows = size[1] / self.BINSIZE
+    self.baddies = []
+    self.bullets = []
+
+  def tick(self):
+    self.bad_bins = [[[]] * self.cols] * self.rows
+    self.bul_bins = [[[]] * self.cols] * self.rows
+
+    for b in self.baddies:
+      b.tick()
+      self._insert_baddie(b)
+    for b in self.bullets:
+      b.tick()
+      self._insert_bullet(b)
+
+    for i in xrange(self.cols):
+      for j in xrange(self.rows):
+        self._check_bin(self.bul_bins[i][j])
+
+  def _get_bins_idxs(self, obj):
+    bin_i = self.size[0] / obj.pos[0]
+    bin_j = self.size[1] / obj.pos[1]
+    i_pos = self.size[0] / float(obj.pos[0]) - bin_i
+    j_pos = self.size[1] / float(obj.pos[1]) - bin_j
+
+    l_bin = r_bin = False
+    bins = [(bin_i, bin_j)]
+    if bin_i > 0:
+      if i_pos < self.BUFSIZE:
+        l_bin = True
+        bins.append((bin_i-1, bin_j))
+    elif bin_i < len(self.cols) - 1:
+      if i_pos > self.BINSIZE - self.BUFSIZE:
+        r_bin = True
+        bins.append((bin_i+1, bin_j))
+
+    if bin_j > 0:
+      if j_pos < self.BUFSIZE:
+        bins.append((bin_i, bin_j-1))
+        if l_bin:
+          bins.append((bin_i-1, bin_j-1))
+        elif r_bin:
+          bins.append((bin_i+1, bin_j-1))
+    elif bin_j < len(self.rows) - 1:
+      if j_pos > self.BINSIZE - self.BUFSIZE:
+        bins.append((bin_i, bin_j))
+        if l_bin:
+          bins.append((bin_i-1, bin_j+1))
+        elif r_bin:
+          bins.append((bin_i+1, bin_j+1))
+
+    return bins
+    
+  def _insert_baddie(self, b):
+    for idx in self._get_bins_idxs(b):
+      self.bad_bins[idx[0],idx[1]].append(b)
+    
+  def _insert_bullet(self, b):
+    for idx in self._get_bins_idxs(b):
+      self.bul_bins[idx[0],idx[1]].append(b)
+
+  def _remove_bullet(self, b, idxs = None):
+    if idxs is None:
+      idxs = self._get_bins_idxs(b)
+    for i,j in idxs:
+      self.bul_bins[i][j].remove(b)
+    self.bullets.remove(b)
+
+  def _remove_baddie(self, b, idxs = None):
+    if idxs is None:
+      idxs = self._get_bins_idxs(b)
+    for i,j in idxs:
+      self.bad_bins[i][j].remove(b)
+    self.baddies.remove(b)
+
+  def _check_bin(self, bul_bin):
+    for i in xrange(len(bul_bin)-1,-1,-1):
+      idxs = self._get_bins_idxs(bul_bin[i])
+      for i,j in idxs:
+        pass#self.bad_bins[
+      bins = self._get_bins_for_baddie(self.bad_bins[i][j][k])
+      for b in bins:
+        for l in xrange(len(b)-1,-1,-1):
+          if b[l].collides(self.bad_bins[i][j][k]):
+            print 'hit and remove'
+            del self.bad_bins[i][j][k]
+            del b[l]
+
+  def add(self, obj):
+    if isinstance(obj, Bullet):
+      self.bullets.append(obj)
+    elif isinstance(obj, Baddie):
+      self.baddies.append(obj)
+    else:
+      print 'Unrecognized type in CollisionSpace.add():', type(obj)
+
 
 
 class Main(object):
@@ -451,9 +561,9 @@ class Main(object):
             sys.exit()
           elif event.key == pygame.K_F7:
             self.spawn_points[random.randrange(len(self.spawn_points))].spawn()
-          elif event.key == pygame.K_KP_PLUS:
+          elif event.key == pygame.K_RIGHTBRACKET:
             self.player.gun.power += 1
-          elif event.key == pygame.K_KP_MINUS:
+          elif event.key == pygame.K_LEFTBRACKET:
             if self.player.gun.power > 0:
               self.player.gun.power -= 1
           elif event.key == pygame.K_F6:
@@ -505,6 +615,7 @@ class Main(object):
         while self.player._build_rect().bottom >= self.height:
           self.player.move(0,-1)
 
+
       ####################################################################
       #                        Level Progression                         #
       ####################################################################
@@ -520,8 +631,13 @@ class Main(object):
           self.levels[self.lev_i].jump_to_next_wave()
       else:
         self.levels[self.lev_i].tick()
-      for s in self.spawn_points:
-        s.tick()
+
+      #self.space.tick()
+      for b in self.baddies: b.tick()
+      for b in self.bullets: b.tick()
+      for s in self.spawn_points: s.tick()
+      
+
 
       ####################################################################
       #                         Drawing Process                          #
@@ -537,7 +653,6 @@ class Main(object):
       # draw the bullets or delete them if they've gone off screen
       # --> reverse search, because we're deleting elements
       for i in xrange(len(self.bullets)-1,-1,-1):
-        self.bullets[i].move_forward()
         if self.bullets[i].pos[0] <= 0 or self.bullets[i].pos[0] >= self.width or \
            self.bullets[i].pos[1] <= 0 or self.bullets[i].pos[1] >= self.height:
           del self.bullets[i]
@@ -546,7 +661,6 @@ class Main(object):
 
       # draw the baddies or delete baddie/bullet on collision
       for i in xrange(len(self.baddies)-1,-1,-1):
-        self.baddies[i].tick()
         remove_me = False
 
         for j in xrange(len(self.bullets)):
@@ -600,9 +714,6 @@ class Main(object):
 
   def empty_list(self, l):
     while 0 < len(l): del l[0]
-    #ind = range(len(l))
-    #ind.reverse()
-    #for i in ind: del l[i]
 
   def empty_lists(self):
     self.empty_list(self.bullets)
