@@ -5,6 +5,8 @@ import time
 import random
 random.seed(time.time())
 
+import optparse
+
 #from OpenGL.GL import *
 #from OpenGL.GLU import *
 
@@ -13,17 +15,63 @@ from pygame.locals import *
 
 
 
+class Stats(object):
+  stats_object = None
+  @staticmethod
+  def get_stats(screen = None, size = None):
+    if Stats.stats_object is None:
+      Stats.stats_object = Stats(screen, size)
+    return Stats.stats_object
+
+  MARGIN = 20
+
+  def __init__(self, screen, size):
+    self.screen = screen
+    self.size = self.width,self.height = size
+    self.font = pygame.font.SysFont("courier", 10)
+    self.counts = {}
+
+  def reset(self, varname = None):
+    if varname is None:
+      self.counts = {}
+    else:
+      self.counts[varname] = 0
+
+  def inc(self, varname):
+    if self.counts.has_key(varname):
+      self.counts[varname] += 1
+    else:
+      self.counts[varname] = 1
+
+  def draw(self):
+    x = self.width - self.MARGIN
+    y = self.MARGIN
+    for key in self.counts:
+      string = "%s: % 8d" % (key, self.counts[key])
+      w,h = self.font.size(string)
+      self.screen.blit(self.font.render(string, False,
+              (255,255,255)), (x-w, y))
+      y += h
+
+
 class Ship(object):
-  '''This class is used for drawing, mainly.  Just pass it some points and
-  things, and it'll handle the rest!'''
-  def __init__(self, screen, color, points, pos = [0,0], traj = 0, size = 10):
+  '''This class is used for drawing, mainly.  Just pass it some points
+  and things, and it'll handle the rest!'''
+  def __init__(self, screen, color, points, pos=(0,0), traj=0, size=10):
     '''Create this!
     screen: The screen to draw on
     color: The color to draw
     points: Points consisting of the line-art
     pos: Initial position of the ship
     traj: Initial trajectory (0 radians is to the left, .5pi is down)
-    size: Size of the ship.'''
+    size: Size of the ship.
+    
+    Something perhaps non-trivial, is that the size parameter is in pixels,
+    but so are the points.  So if the size is 5 but there's a point in the
+    points list that's something like "(40,80)", then the effect will be that
+    the effectual size of the ship will be sqrt(40**2+80**2) * 5 = 447.2, so
+    beware.  It is recommended that you try to keep the values in the points
+    argument to <= 1.'''
 
     self.screen = screen
     self.color = color
@@ -233,6 +281,13 @@ class SpawnPoint(object):
     self.baddies = baddies_array
     self.traj = math.atan2(size[0] / 2 - y, size[1] / 2 - x)
     self.queue = []
+    self.paused = False
+
+  def pause(self):
+    self.paused = True
+
+  def resume(self):
+    self.paused = False
 
   def spawn(self, baddie_type = Wiggler):
     self.baddies.append(baddie_type(self.screen, self.pos, self.traj))
@@ -241,6 +296,7 @@ class SpawnPoint(object):
     self.queue.append(baddie_type)
 
   def tick(self):
+    if self.paused: return
     if len(self.queue) > 0 and random.randrange(100) < 20:
       self.spawn(self.queue[0])
       del self.queue[0]
@@ -274,9 +330,23 @@ class Level(object):
     self.greeting_pos = (size[0] - w) / 2, (size[1] - h) / 2
 
     self.progression = progression
-    self.prog_i = 0
+    self.prog_i = -1
+    self.paused = False
+
+  def started(self):
+    return self.prog_i >= 0
+
+  def pause(self):
+    self.paused = pygame.time.get_ticks()
+    for sp in self.spawns: sp.pause()
+    
+  def resume(self):
+    for sp in self.spawns: sp.resume()
+    self.start_time += pygame.time.get_ticks() - self.paused
+    self.paused = False
 
   def start(self):
+    self.paused = False
     self.prog_i = 0
     self.start_time = pygame.time.get_ticks()
 
@@ -287,6 +357,8 @@ class Level(object):
       return (9e9999,-1,None,0)
 
   def tick(self):
+    if self.paused: return
+
     # Check/spawn queue
     if self.prog_i < len(self.progression):
       while self._p()[0] <= pygame.time.get_ticks() - self.start_time:
@@ -313,6 +385,10 @@ class Input(object):
     if pygame.joystick.get_count() > 0:
       self.js = pygame.joystick.Joystick(0)
       self.js.init()
+      if self.js.get_numaxes() < 4:
+        self.js.quit()
+        self.js = None
+        return
       print 'using %d axes' % self.js.get_numaxes()
     else:
       self.js = None
@@ -373,99 +449,168 @@ class Input(object):
 
 class CollisionSpace(object):
   BINSIZE = 50
-  BUFSIZE = .1
+  BUFSIZE = .2
 
   def __init__(self, size, player):
-    self.size = size
+    self.size = self.width,self.height = size
     self.player = player
     self.cols = size[0] / self.BINSIZE
     self.rows = size[1] / self.BINSIZE
     self.baddies = []
     self.bullets = []
 
+  def empty(self):
+    self.baddies = []
+    self.bullets = []
+
+  def _tick_baddie(self, baddie):
+    baddie.tick()
+    rect = baddie._build_rect()
+    if rect.left <= 0 or rect.right >= self.width:
+      baddie.traj = math.pi - baddie.traj
+      while baddie._build_rect().left <= 0:
+        baddie.move(1,0)
+      while baddie._build_rect().right >= self.width:
+        baddie.move(-1,0)
+
+    if rect.top <= 0 or rect.bottom >= self.height:
+      baddie.traj = -baddie.traj
+      while baddie._build_rect().top <= 0:
+        baddie.move(0,1)
+      while baddie._build_rect().bottom >= self.height:
+        baddie.move(0,-1)
+    self._insert_baddie(baddie)
+
   def tick(self):
-    self.bad_bins = [[[]] * self.cols] * self.rows
-    self.bul_bins = [[[]] * self.cols] * self.rows
-
-    for b in self.baddies:
-      b.tick()
-      self._insert_baddie(b)
-    for b in self.bullets:
-      b.tick()
-      self._insert_bullet(b)
-
+    self.bins = []
     for i in xrange(self.cols):
+      self.bins.append([])
       for j in xrange(self.rows):
-        self._check_bin(self.bul_bins[i][j])
+        self.bins[i].append([])
+
+    Stats.get_stats().counts['num_bins'] = self.rows * self.cols
+    Stats.get_stats().counts['baddies'] = len(self.baddies)
+    Stats.get_stats().counts['bullets'] = len(self.bullets)
+
+    # update baddies and put them in their bins
+    for b in self.baddies:
+      self._tick_baddie(b)
+
+    # update ship, bound in the square, and check collisions
+    for i,j in self._get_bins_idxs(self.player):
+      for b in self.bins[i][j]:
+        if b.collides(self.player):
+          self.player.explode()
+          break
+      if self.player.exploding: break
+
+    # update bullets and delete when O.O.B.
+    for b1 in xrange(len(self.bullets)-1,-1,-1):
+      self.bullets[b1].tick()
+      pos = self.bullets[b1].pos
+      w,h = self.size
+      if pos[0] < 0 or pos[1] < 0 or pos[0] > w or pos[1] > h:
+        del self.bullets[b1]
+      else:
+        removed = False
+        for i,j in self._get_bins_idxs(self.bullets[b1]):
+          for b2 in xrange(len(self.bins[i][j])-1,-1,-1):
+            Stats.get_stats().inc("comparisons")
+            if self.bins[i][j][b2].collides(self.bullets[b1]):
+              self._remove_bullet(self.bullets[b1])
+              self._remove_baddie(self.bins[i][j][b2])
+              removed = True
+              break
+          if removed: break
+
+  def _get_simple_bins_idxs(self, obj):
+    Stats.get_stats().inc("_get_simple_bins_idxs")
+    pos = ( float(obj.pos[0]) / self.size[0] * self.cols,
+            float(obj.pos[1]) / self.size[1] * self.rows )
+    bin_i = int(pos[0])
+    bin_j = int(pos[1])
+    i_pos = pos[0] - bin_i
+    j_pos = pos[1] - bin_j
+
+    if bin_i < 0:
+      bin_i = 0
+    elif bin_i >= self.cols:
+      bin_i = self.cols - 1
+    if bin_j < 0:
+      bin_j = 0
+    elif bin_j >= self.rows:
+      bin_j = self.rows - 1
+
+    return bin_i,bin_j
 
   def _get_bins_idxs(self, obj):
-    bin_i = self.size[0] / obj.pos[0]
-    bin_j = self.size[1] / obj.pos[1]
-    i_pos = self.size[0] / float(obj.pos[0]) - bin_i
-    j_pos = self.size[1] / float(obj.pos[1]) - bin_j
+    Stats.get_stats().inc("_get_bins_idxs")
+    pos = ( float(obj.pos[0]) / self.size[0] * self.cols,
+            float(obj.pos[1]) / self.size[1] * self.rows )
+    bin_i = int(pos[0])
+    bin_j = int(pos[1])
+    i_pos = pos[0] - bin_i
+    j_pos = pos[1] - bin_j
+
+    skip_col_ovrlp = skip_row_ovrlp = False
+    if bin_i < 0:
+      bin_i = 0
+      skip_col_ovrlp = True
+    elif bin_i >= self.cols:
+      bin_i = self.cols - 1
+      skip_col_ovrlp = True
+    if bin_j < 0:
+      bin_j = 0
+      skip_row_ovrlp = True
+    elif bin_j >= self.rows:
+      bin_j = self.rows - 1
+      skip_row_ovrlp = True
 
     l_bin = r_bin = False
     bins = [(bin_i, bin_j)]
-    if bin_i > 0:
+    if not skip_col_ovrlp:
       if i_pos < self.BUFSIZE:
-        l_bin = True
-        bins.append((bin_i-1, bin_j))
-    elif bin_i < len(self.cols) - 1:
-      if i_pos > self.BINSIZE - self.BUFSIZE:
-        r_bin = True
-        bins.append((bin_i+1, bin_j))
+        if bin_i > 0:
+          l_bin = True
+          bins.append((bin_i-1, bin_j))
+      elif i_pos > 1 - self.BUFSIZE:
+        if bin_i < self.cols - 1:
+          r_bin = True
+          bins.append((bin_i+1, bin_j))
 
-    if bin_j > 0:
+    if not skip_row_ovrlp:
       if j_pos < self.BUFSIZE:
-        bins.append((bin_i, bin_j-1))
-        if l_bin:
-          bins.append((bin_i-1, bin_j-1))
-        elif r_bin:
-          bins.append((bin_i+1, bin_j-1))
-    elif bin_j < len(self.rows) - 1:
-      if j_pos > self.BINSIZE - self.BUFSIZE:
-        bins.append((bin_i, bin_j))
-        if l_bin:
-          bins.append((bin_i-1, bin_j+1))
-        elif r_bin:
-          bins.append((bin_i+1, bin_j+1))
+        if bin_j > 0:
+          bins.append((bin_i, bin_j-1))
+          if l_bin:
+            bins.append((bin_i-1, bin_j-1))
+          elif r_bin:
+            bins.append((bin_i+1, bin_j-1))
+      elif j_pos > 1 - self.BUFSIZE:
+        if bin_j < self.rows - 1:
+          bins.append((bin_i, bin_j))
+          if l_bin:
+            bins.append((bin_i-1, bin_j+1))
+          elif r_bin:
+            bins.append((bin_i+1, bin_j+1))
 
+    #if self.player == obj:
+    #  print '           num bins:', len(bins)
+    #  sys.stdout.flush()
     return bins
     
   def _insert_baddie(self, b):
-    for idx in self._get_bins_idxs(b):
-      self.bad_bins[idx[0],idx[1]].append(b)
-    
-  def _insert_bullet(self, b):
-    for idx in self._get_bins_idxs(b):
-      self.bul_bins[idx[0],idx[1]].append(b)
+    i,j = self._get_simple_bins_idxs(b)
+    self.bins[i][j].append(b)
 
-  def _remove_bullet(self, b, idxs = None):
-    if idxs is None:
-      idxs = self._get_bins_idxs(b)
-    for i,j in idxs:
-      self.bul_bins[i][j].remove(b)
+  def _remove_bullet(self, b):
     self.bullets.remove(b)
 
   def _remove_baddie(self, b, idxs = None):
     if idxs is None:
-      idxs = self._get_bins_idxs(b)
-    for i,j in idxs:
-      self.bad_bins[i][j].remove(b)
+      idxs = self._get_simple_bins_idxs(b)
+    self.bins[idxs[0]][idxs[1]].remove(b)
     self.baddies.remove(b)
-
-  def _check_bin(self, bul_bin):
-    for i in xrange(len(bul_bin)-1,-1,-1):
-      idxs = self._get_bins_idxs(bul_bin[i])
-      for i,j in idxs:
-        pass#self.bad_bins[
-      bins = self._get_bins_for_baddie(self.bad_bins[i][j][k])
-      for b in bins:
-        for l in xrange(len(b)-1,-1,-1):
-          if b[l].collides(self.bad_bins[i][j][k]):
-            print 'hit and remove'
-            del self.bad_bins[i][j][k]
-            del b[l]
 
   def add(self, obj):
     if isinstance(obj, Bullet):
@@ -475,19 +620,31 @@ class CollisionSpace(object):
     else:
       print 'Unrecognized type in CollisionSpace.add():', type(obj)
 
+  def draw(self):
+    #for x in xrange(self.BINSIZE, self.size[0], self.BINSIZE):
+    #  pygame.draw.line(Main.get_main().screen, (0,0,255), (x,0), (x,self.size[1]), 1)
+    #for y in xrange(self.BINSIZE, self.size[1], self.BINSIZE):
+    #  pygame.draw.line(Main.get_main().screen, (0,0,255), (0,y), (self.size[0],y), 1)
+    for b in self.baddies: b.draw()
+    for b in self.bullets: b.draw()
+
 
 
 class Main(object):
-  def __init__(self):
+  def __init__(self, options):
+    assert self.MAIN_OBJECT is None, "Another Main object is being created!"
+
     pygame.init()
-    self.size = self.width, self.height = 800, 600
+    self.size = self.width, self.height = options.size
     self.screen = pygame.display.set_mode(self.size, HWSURFACE | DOUBLEBUF)
+    self.stats = Stats.get_stats(self.screen, self.size)
 
     self.player = Player.spawn_at(self.screen, self.width/2, self.height/2)
     self.speed = 2
     self.black = (0,0,0)
 
     self.fps_timer = pygame.time.Clock()
+    self.fps = 30
 
     # fonts
     self.score_font = pygame.font.SysFont('courier', 25, bold = True)
@@ -502,37 +659,41 @@ class Main(object):
                       (self.height - self.winner_pos[1]) / 2
 
     self.user_input = Input()
-    self.bullets = []
-    self.baddies = []
+    self.space = CollisionSpace(self.size, self.player)
     dw, dh = .1 * self.width, .1 * self.height
     self.spawn_points = [
         SpawnPoint(self.screen, self.size,
-                             dw,               dh, self.baddies),
+                             dw,               dh, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                             dw, self.height - dh, self.baddies),
+                             dw, self.height - dh, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                self.width - dw,               dh, self.baddies),
+                self.width - dw,               dh, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                self.width - dw, self.height - dh, self.baddies) ]
+                self.width - dw, self.height - dh, self.space.baddies) ]
     self.score = 0
     self.winner = False
 
-    self.lev_i = 0
+    self.lev_i = 2
     self.levels = [ Level(self.screen, self.size, self.spawn_points,
                           "Level 1", [ (2e3, 0, Wiggler, 20),
                                        (2e3, 1, Wiggler, 20),
-                                       (2e3, 2, Homer, 20),
+                                       (2e3, 2, Homer,   20),
                                        (2e3, 3, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
-                          "Level 2", [ (2000, 0, Wiggler, 200),
-                                       (2000, 1, Wiggler, 200),
-                                       (2000, 2, Wiggler, 200),
-                                       (2000, 3, Wiggler, 200) ]),
+                          "Level 2", [ (2e3, 0, Wiggler, 20),
+                                       (2e3, 1, Homer,   20),
+                                       (2e3, 2, Wiggler, 20),
+                                       (2e3, 3, Homer,   20),
+                                       (1e4, 1, Homer,   20),
+                                       (1e4, 2, Wiggler, 20),
+                                       (1e4, 1, Homer,   20),
+                                       (1e4, 2, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
-                          "Level 3", [ (2000, 0, Wiggler, 2000),
-                                       (2000, 1, Wiggler, 2000),
-                                       (2000, 2, Wiggler, 2000),
-                                       (2000, 3, Wiggler, 2000) ]) ]
+                          "Level 3", [ (2e3, 0, Wiggler, 2000),
+                                       (2e3, 1, Wiggler, 2000),
+                                       (2e3, 2, Wiggler, 2000),
+                                       (2e3, 3, Wiggler, 2000),
+                                       (1e4, 3, Homer,   2000) ]) ]
 
 
   def run(self):
@@ -544,7 +705,14 @@ class Main(object):
     self.levels[self.lev_i].start()
 
     while True:
-      self.fps_timer.tick(60)
+      self.fps_timer.tick(self.fps)
+      if self.levels[self.lev_i].paused:
+        if self.fps_timer.get_fps() >= self.fps:
+          self.levels[self.lev_i].resume()
+      else:
+        if self.fps_timer.get_fps() < self.fps:
+          self.levels[self.lev_i].pause()
+
 
 
       ####################################################################
@@ -568,8 +736,8 @@ class Main(object):
               self.player.gun.power -= 1
           elif event.key == pygame.K_F6:
             print 'stats:'
-            print '  Num Baddies:', len(self.baddies)
-            print '  Num Bullets:', len(self.bullets)
+            print '  Num Baddies:', len(self.space.baddies)
+            print '  Num Bullets:', len(self.space.bullets)
       pygame.event.clear()
 
       # Movement
@@ -579,7 +747,7 @@ class Main(object):
           for s in self.spawn_points: s.clear()
           del self.player
           self.player = Player.spawn_at(self.screen, self.width / 2, self.height / 2)
-          self.empty_lists()
+          self.space.empty()
           self.score = 0
           self.levels[self.lev_i].start()
       else:
@@ -599,7 +767,7 @@ class Main(object):
         js_fy = self.user_input.get_fy()
         if abs(js_fx) > .1 or abs(js_fy) > .1:
           for b in self.player.fire(math.atan2(js_fy, js_fx)):
-            self.bullets.append(b)
+            self.space.add(b)
 
 
         ##################################################################
@@ -626,15 +794,15 @@ class Main(object):
           if self.lev_i < len(self.levels):
             self.levels[self.lev_i].start()
           else:
-            winner = True
+            self.winner = True
         else:
           self.levels[self.lev_i].jump_to_next_wave()
-      else:
+      elif not self.winner:
         self.levels[self.lev_i].tick()
 
-      #self.space.tick()
-      for b in self.baddies: b.tick()
-      for b in self.bullets: b.tick()
+      self.space.tick()
+      #for b in self.baddies: b.tick()
+      #for b in self.bullets: b.tick()
       for s in self.spawn_points: s.tick()
       
 
@@ -647,63 +815,26 @@ class Main(object):
 
       for s in self.spawn_points: s.draw()
 
+      self.space.draw()
+
       if self.lev_i < len(self.levels):
         self.levels[self.lev_i].draw()
-
-      # draw the bullets or delete them if they've gone off screen
-      # --> reverse search, because we're deleting elements
-      for i in xrange(len(self.bullets)-1,-1,-1):
-        if self.bullets[i].pos[0] <= 0 or self.bullets[i].pos[0] >= self.width or \
-           self.bullets[i].pos[1] <= 0 or self.bullets[i].pos[1] >= self.height:
-          del self.bullets[i]
-        else:
-          self.bullets[i].draw()
-
-      # draw the baddies or delete baddie/bullet on collision
-      for i in xrange(len(self.baddies)-1,-1,-1):
-        remove_me = False
-
-        for j in xrange(len(self.bullets)):
-          if self.bullets[j].collides(self.baddies[i]):
-            remove_me = True
-            del self.bullets[j]
-            self.score += 100
-            break
-
-        if remove_me:
-          del self.baddies[i]
-        else:
-          rect = self.baddies[i]._build_rect()
-          if rect.left <= 0 or rect.right >= self.width:
-            self.baddies[i].traj = math.pi - self.baddies[i].traj
-            while self.baddies[i]._build_rect().left <= 0:
-              self.baddies[i].move(1,0)
-            while self.baddies[i]._build_rect().right >= self.width:
-              self.baddies[i].move(-1,0)
-
-          if rect.top <= 0 or rect.bottom >= self.height:
-            self.baddies[i].traj = -self.baddies[i].traj
-            while self.baddies[i]._build_rect().top <= 0:
-              self.baddies[i].move(0,1)
-            while self.baddies[i]._build_rect().bottom >= self.height:
-              self.baddies[i].move(0,-1)
-
-          self.baddies[i].draw()
-          if not self.player.exploding:
-            if rect.colliderect(self.player._build_rect()):
-              self.player.explode()
-
       
       if self.winner:
-        self.screen.blit(winner_font.render("WINNER", False,
-          (255,255,255)), self.winner_pos)
+        self.screen.blit(self.winner_font.render("WINNER", False,
+            (255,255,255)), self.winner_pos)
       if self.player.exploding:
         self.screen.blit(self.gameover_font.render("GAME OVER", False,
-          (255,255,255)), self.gameover_pos)
-      self.screen.blit(self.score_font.render('%d' % self.score, False,
-          (255,255,255)), (10,10))
+            (255,255,255)), self.gameover_pos)
+      self.screen.blit(self.score_font.render('%d' % self.score,
+          False, (255,255,255)), (10,10))
+      #self.screen.blit(self.score_font.render('{:,}'.format(self.score),
+      #    False, (255,255,255)), (10,10))
 
       self.player.draw()
+      self.stats.counts['FPS'] = self.fps_timer.get_fps()
+      self.stats.draw()
+      self.stats.reset()
       pygame.display.flip()
 
   def spawn_points_empty(self):
@@ -712,23 +843,49 @@ class Main(object):
         return False
     return True
 
-  def empty_list(self, l):
-    while 0 < len(l): del l[0]
-
-  def empty_lists(self):
-    self.empty_list(self.bullets)
-    self.empty_list(self.baddies)
-
   def no_more_baddies(self):
-    return self.spawn_points_empty() and len(self.baddies) <= 0
+    return self.spawn_points_empty() and len(self.space.baddies) <= 0
 
+  # singleton enforcement ... and acts as a global variable
   MAIN_OBJECT = None
   @staticmethod
-  def get_main():
+  def get_main(options=None):
     if Main.MAIN_OBJECT is None:
-      Main.MAIN_OBJECT = Main()
+      Main.MAIN_OBJECT = Main(options)
+    elif options is not None:
+      assert len(args) > 0, "Main object already created and arguments passed!"
     return Main.MAIN_OBJECT
 
 
+def parse_args():
+  '''Parses the command line arguments and returns an option object.'''
+  op = optparse.OptionParser()
+  op.set_defaults(config = '~/.linebattlesrc',
+                  input_type = 'none')
+  op.add_option('-C', '--config', help="Use a different config file.")
+  op.add_option('-j', '--input', dest='input_type',
+                type='choice', choices=('none','keyboard','joystick'),
+                help="Force use of the joystick.")
+  op.add_option('-s', '--size', default='800x600',
+                action='store', type='string',
+                help="Set the window resolution.")
+  (options, args) = op.parse_args()
+
+  try:
+    options.size = map(lambda x: int(x), options.size.split('x'))
+  except ValueError:
+    op.error('Invalid size parameter: "%s"' % options.size)
+  finally:
+    if len(options.size) != 2:
+      op.error('Invalid size parameter: "%s"' %
+          reduce(lambda a,b: '%sx%s' % (a,b), options.size))
+
+  if len(args) > 0:
+    print 'Unrecognized option:', args[0]
+    sys.exit()
+
+  return options
+
+
 if __name__ == '__main__':
-  Main.get_main().run()
+  Main.get_main(parse_args()).run()
