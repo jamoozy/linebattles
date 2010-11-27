@@ -11,6 +11,7 @@ import optparse
 #from OpenGL.GLU import *
 
 import pygame
+import pygame.gfxdraw
 from pygame.locals import *
 
 
@@ -28,7 +29,7 @@ class Stats(object):
   def __init__(self, screen, size):
     self.screen = screen
     self.size = self.width,self.height = size
-    self.font = pygame.font.SysFont("courier", 10)
+    self.font = pygame.font.SysFont("courier", 10, bold=True)
     self.counts = {}
 
   def reset(self, varname = None):
@@ -49,7 +50,7 @@ class Stats(object):
     for key in self.counts:
       string = "%s: % 8d" % (key, self.counts[key])
       w,h = self.font.size(string)
-      self.screen.blit(self.font.render(string, False,
+      self.screen.blit(self.font.render(string, True,
               (255,255,255)), (x-w, y))
       y += h
 
@@ -65,7 +66,7 @@ class Ship(object):
     pos: Initial position of the ship
     traj: Initial trajectory (0 radians is to the left, .5pi is down)
     size: Size of the ship.
-    
+
     Something perhaps non-trivial, is that the size parameter is in pixels,
     but so are the points.  So if the size is 5 but there's a point in the
     points list that's something like "(40,80)", then the effect will be that
@@ -79,6 +80,7 @@ class Ship(object):
     self.pos = list(pos)
     self.traj = traj
     self.size = size
+    self.speed = 2  # really more like the max speed
 
     # rect ensures the bbox for this is calculated at most once per tick
     self.rect = None   # i.e., not up-to-date
@@ -88,8 +90,9 @@ class Ship(object):
     self.pos[0] += dx
     self.pos[1] += dy
 
-  def move_forward(self, speed):
+  def move_forward(self, amt):
     self.rect = None
+    speed = self.speed * amt
     self.pos[0] += math.cos(self.traj) * speed
     self.pos[1] += math.sin(self.traj) * speed
 
@@ -120,6 +123,8 @@ class Ship(object):
     return self._build_rect().center
 
   def draw(self):
+    pygame.gfxdraw.filled_polygon(self.screen,
+            self._calc_global_ps(), self.color + (80,))
     pygame.draw.lines(self.screen, self.color, True, self._calc_global_ps())
 
   def collides(self, that):
@@ -141,14 +146,20 @@ class Player(Ship):
   def __init__(self, screen):
     Ship.__init__(self, screen, (200, 200, 255),
                   [ [ 0, -1], [ 2, -1], [ 0, -2], [-2, -1],
-                    [ 0, -1], [ 0,  1], [ 2,  1], [ 0,  2],
-                    [-2,  1], [ 0,  1], [-2, -1], [-2,  1] ],
+                    [-2,  1], [ 0,  2], [ 2,  1], [ 0,  1] ],
                   size = 5)
+    self.screen = screen
+    self.reset()
+
+  def reset(self):
     self.last_fire_time = 0
     self.fire_delay = 100 # ms
     self.exploding = False
     self.expl_prog = 0
-    self.gun = Gun(screen, 0)
+    self.gun = Gun(self.screen, 0)
+    self.speed = 4
+    self.score = 0
+
 
   def okay_to_fire(self):
     ticks = pygame.time.get_ticks()
@@ -160,7 +171,7 @@ class Player(Ship):
   def draw(self):
     if self.exploding:
       self.expl_prog += .5
-      pygame.draw.circle(self.screen, (255,0,0), 
+      pygame.draw.circle(self.screen, (255,0,0),
           (int(self.pos[0]),int(self.pos[1])), int(self.expl_prog))
     else:
       Ship.draw(self)
@@ -188,7 +199,7 @@ class Bullet(object):
     self.screen = screen
     self.pos = list(pos)
     self.traj = traj
-    self.speed = 4.
+    self.speed = 8
     self.length = 10
     self.color = 255,0,0
 
@@ -225,7 +236,7 @@ class Gun(object):
 
   def fire(self, pos, traj):
     bullets = []
-    for i in xrange(-self.power, self.power + 1, 2):
+    for i in xrange(-self.power, self.power + 1, 4):
       bullets.append(Bullet(self.screen, pos, traj + i / 100.))
     return bullets
 
@@ -240,7 +251,8 @@ class Baddie(Ship):
     Ship.__init__(self, screen, color, geom, size = size)
     self.pos = list(pos)
     self.traj = traj
-    self.speed = .5
+    self.speed = 1
+    self.score = 100
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -250,6 +262,7 @@ class Wiggler(Baddie):
   def __init__(self, screen, pos, traj):
     Baddie.__init__(self, screen, (0,255,0), pos, traj, 5,
             ((1,1), (1,-1), (-1,-1), (-1, 1)))
+    self.score = 200
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -262,7 +275,7 @@ class Homer(Baddie):
   def __init__(self, screen, pos, traj):
     Baddie.__init__(self, screen, (255,0,255), pos, traj, 5,
             ((2,0), (0,-1), (-2,0), (0,1)))
-    self.speed = .4
+    self.speed = 2
     self.dt = .01  # max change in traj
 
   def tick(self):
@@ -339,7 +352,7 @@ class Level(object):
   def pause(self):
     self.paused = pygame.time.get_ticks()
     for sp in self.spawns: sp.pause()
-    
+
   def resume(self):
     for sp in self.spawns: sp.resume()
     self.start_time += pygame.time.get_ticks() - self.paused
@@ -399,10 +412,9 @@ class Input(object):
       keys = pygame.key.get_pressed()
       if keys[pygame.K_f]:
         return 1.
-      elif keys[pygame.K_s]:
+      if keys[pygame.K_s]:
         return -1.
-      else:
-        return .0
+      return .0
     else:
       return self.js.get_axis(0)
 
@@ -412,10 +424,9 @@ class Input(object):
       keys = pygame.key.get_pressed()
       if keys[pygame.K_d]:
         return 1.
-      elif keys[pygame.K_e]:
+      if keys[pygame.K_e]:
         return -1.
-      else:
-        return .0
+      return .0
     else:
       return self.js.get_axis(1)
 
@@ -425,10 +436,9 @@ class Input(object):
       keys = pygame.key.get_pressed()
       if keys[pygame.K_l]:
         return 1.
-      elif keys[pygame.K_j]:
+      if keys[pygame.K_j]:
         return -1.
-      else:
-        return .0
+      return .0
     else:
       return self.js.get_axis(2)
 
@@ -438,10 +448,9 @@ class Input(object):
       keys = pygame.key.get_pressed()
       if keys[pygame.K_k]:
         return 1.
-      elif keys[pygame.K_i]:
+      if keys[pygame.K_i]:
         return -1.
-      else:
-        return .0
+      return .0
     else:
       return self.js.get_axis(3)
 
@@ -460,8 +469,8 @@ class CollisionSpace(object):
     self.bullets = []
 
   def empty(self):
-    self.baddies = []
-    self.bullets = []
+    while len(self.baddies) > 0: del self.baddies[0]
+    while len(self.bullets) > 0: del self.bullets[0]
 
   def _tick_baddie(self, baddie):
     baddie.tick()
@@ -488,10 +497,6 @@ class CollisionSpace(object):
       for j in xrange(self.rows):
         self.bins[i].append([])
 
-    Stats.get_stats().counts['num_bins'] = self.rows * self.cols
-    Stats.get_stats().counts['baddies'] = len(self.baddies)
-    Stats.get_stats().counts['bullets'] = len(self.bullets)
-
     # update baddies and put them in their bins
     for b in self.baddies:
       self._tick_baddie(b)
@@ -517,6 +522,7 @@ class CollisionSpace(object):
           for b2 in xrange(len(self.bins[i][j])-1,-1,-1):
             Stats.get_stats().inc("comparisons")
             if self.bins[i][j][b2].collides(self.bullets[b1]):
+              self.player.score += self.bins[i][j][b2].score
               self._remove_bullet(self.bullets[b1])
               self._remove_baddie(self.bins[i][j][b2])
               removed = True
@@ -524,7 +530,6 @@ class CollisionSpace(object):
           if removed: break
 
   def _get_simple_bins_idxs(self, obj):
-    Stats.get_stats().inc("_get_simple_bins_idxs")
     pos = ( float(obj.pos[0]) / self.size[0] * self.cols,
             float(obj.pos[1]) / self.size[1] * self.rows )
     bin_i = int(pos[0])
@@ -544,7 +549,6 @@ class CollisionSpace(object):
     return bin_i,bin_j
 
   def _get_bins_idxs(self, obj):
-    Stats.get_stats().inc("_get_bins_idxs")
     pos = ( float(obj.pos[0]) / self.size[0] * self.cols,
             float(obj.pos[1]) / self.size[1] * self.rows )
     bin_i = int(pos[0])
@@ -598,7 +602,7 @@ class CollisionSpace(object):
     #  print '           num bins:', len(bins)
     #  sys.stdout.flush()
     return bins
-    
+
   def _insert_baddie(self, b):
     i,j = self._get_simple_bins_idxs(b)
     self.bins[i][j].append(b)
@@ -640,11 +644,13 @@ class Main(object):
     self.stats = Stats.get_stats(self.screen, self.size)
 
     self.player = Player.spawn_at(self.screen, self.width/2, self.height/2)
-    self.speed = 2
-    self.black = (0,0,0)
+    self.paused = False
 
     self.fps_timer = pygame.time.Clock()
-    self.fps = 30
+    self.fps = options.fps
+    self.min_fps = options.min_fps
+    if self.min_fps > self.fps:
+      self.min_fps = self.fps
 
     # fonts
     self.score_font = pygame.font.SysFont('courier', 25, bold = True)
@@ -662,18 +668,16 @@ class Main(object):
     self.space = CollisionSpace(self.size, self.player)
     dw, dh = .1 * self.width, .1 * self.height
     self.spawn_points = [
+        SpawnPoint(self.screen, self.size, 0, 0, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                             dw,               dh, self.space.baddies),
+                0, self.height, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                             dw, self.height - dh, self.space.baddies),
+                self.width, 0, self.space.baddies),
         SpawnPoint(self.screen, self.size,
-                self.width - dw,               dh, self.space.baddies),
-        SpawnPoint(self.screen, self.size,
-                self.width - dw, self.height - dh, self.space.baddies) ]
-    self.score = 0
+                self.width, self.height, self.space.baddies) ]
     self.winner = False
 
-    self.lev_i = 2
+    self.lev_i = 0
     self.levels = [ Level(self.screen, self.size, self.spawn_points,
                           "Level 1", [ (2e3, 0, Wiggler, 20),
                                        (2e3, 1, Wiggler, 20),
@@ -696,6 +700,72 @@ class Main(object):
                                        (1e4, 3, Homer,   2000) ]) ]
 
 
+  def tick(self):
+    # Movement
+    if self.player.exploding:
+      # explode and restart
+      if self.player.expl_prog >= 30:
+        for s in self.spawn_points: s.clear()
+        self.player.reset()
+        self.player.pos = [ self.width / 2, self.height / 2 ]
+        self.space.empty()
+        self.levels[self.lev_i].start()
+    else:
+      js_dx = self.user_input.get_mx()
+      js_dy = self.user_input.get_my()
+      self.player.traj = math.atan2(js_dy, js_dx)
+      if abs(js_dx) > .1 or abs(js_dy) > .1:
+        amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
+        if amt > 1:
+          amt = 1.
+        elif amt < -1:
+          amt = -1.
+        self.player.move_forward(amt)
+
+      # Fire
+      js_fx = self.user_input.get_fx()
+      js_fy = self.user_input.get_fy()
+      if abs(js_fx) > .1 or abs(js_fy) > .1:
+        for b in self.player.fire(math.atan2(js_fy, js_fx)):
+          self.space.add(b)
+
+
+      ##################################################################
+      #                      Collision Detection                       #
+      ##################################################################
+
+      while self.player._build_rect().left <= 0:
+        self.player.move(1,0)
+      while self.player._build_rect().right >= self.width:
+        self.player.move(-1,0)
+      while self.player._build_rect().top <= 0:
+        self.player.move(0,1)
+      while self.player._build_rect().bottom >= self.height:
+        self.player.move(0,-1)
+
+
+    ####################################################################
+    #                        Level Progression                         #
+    ####################################################################
+
+    if self.lev_i < len(self.levels) and self.no_more_baddies():
+      if self.levels[self.lev_i].done():
+        self.lev_i += 1
+        if self.lev_i < len(self.levels):
+          self.levels[self.lev_i].start()
+        else:
+          self.winner = True
+      else:
+        self.levels[self.lev_i].jump_to_next_wave()
+    elif not self.winner:
+      self.levels[self.lev_i].tick()
+
+    self.space.tick()
+    #for b in self.baddies: b.tick()
+    #for b in self.bullets: b.tick()
+    for s in self.spawn_points: s.tick()
+
+
   def run(self):
 
     ######################################################################
@@ -705,14 +775,15 @@ class Main(object):
     self.levels[self.lev_i].start()
 
     while True:
+      self.stats.reset()
+
       self.fps_timer.tick(self.fps)
       if self.levels[self.lev_i].paused:
-        if self.fps_timer.get_fps() >= self.fps:
+        if self.fps_timer.get_fps() >= self.min_fps:
           self.levels[self.lev_i].resume()
       else:
-        if self.fps_timer.get_fps() < self.fps:
+        if self.fps_timer.get_fps() < self.min_fps:
           self.levels[self.lev_i].pause()
-
 
 
       ####################################################################
@@ -734,84 +805,23 @@ class Main(object):
           elif event.key == pygame.K_LEFTBRACKET:
             if self.player.gun.power > 0:
               self.player.gun.power -= 1
+          elif event.key == pygame.K_p:
+            self.paused = not self.paused
           elif event.key == pygame.K_F6:
             print 'stats:'
             print '  Num Baddies:', len(self.space.baddies)
             print '  Num Bullets:', len(self.space.bullets)
       pygame.event.clear()
 
-      # Movement
-      if self.player.exploding:
-        # explode and restart
-        if self.player.expl_prog >= 30:
-          for s in self.spawn_points: s.clear()
-          del self.player
-          self.player = Player.spawn_at(self.screen, self.width / 2, self.height / 2)
-          self.space.empty()
-          self.score = 0
-          self.levels[self.lev_i].start()
-      else:
-        js_dx = self.user_input.get_mx()
-        js_dy = self.user_input.get_my()
-        self.player.traj = math.atan2(js_dy, js_dx)
-        if abs(js_dx) > .1 or abs(js_dy) > .1:
-          amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
-          if amt > 1:
-            amt = 1.
-          elif amt < -1:
-            amt = -1.
-          self.player.move_forward(self.speed * amt)
+      if not self.paused: self.tick()
 
-        # Fire
-        js_fx = self.user_input.get_fx()
-        js_fy = self.user_input.get_fy()
-        if abs(js_fx) > .1 or abs(js_fy) > .1:
-          for b in self.player.fire(math.atan2(js_fy, js_fx)):
-            self.space.add(b)
-
-
-        ##################################################################
-        #                      Collision Detection                       #
-        ##################################################################
-
-        while self.player._build_rect().left <= 0:
-          self.player.move(1,0)
-        while self.player._build_rect().right >= self.width:
-          self.player.move(-1,0)
-        while self.player._build_rect().top <= 0:
-          self.player.move(0,1)
-        while self.player._build_rect().bottom >= self.height:
-          self.player.move(0,-1)
-
-
-      ####################################################################
-      #                        Level Progression                         #
-      ####################################################################
-
-      if self.lev_i < len(self.levels) and self.no_more_baddies():
-        if self.levels[self.lev_i].done():
-          self.lev_i += 1
-          if self.lev_i < len(self.levels):
-            self.levels[self.lev_i].start()
-          else:
-            self.winner = True
-        else:
-          self.levels[self.lev_i].jump_to_next_wave()
-      elif not self.winner:
-        self.levels[self.lev_i].tick()
-
-      self.space.tick()
-      #for b in self.baddies: b.tick()
-      #for b in self.bullets: b.tick()
-      for s in self.spawn_points: s.tick()
-      
 
 
       ####################################################################
       #                         Drawing Process                          #
       ####################################################################
 
-      self.screen.fill(self.black)
+      self.screen.fill((0,0,0))
 
       for s in self.spawn_points: s.draw()
 
@@ -819,14 +829,14 @@ class Main(object):
 
       if self.lev_i < len(self.levels):
         self.levels[self.lev_i].draw()
-      
+
       if self.winner:
         self.screen.blit(self.winner_font.render("WINNER", False,
             (255,255,255)), self.winner_pos)
       if self.player.exploding:
         self.screen.blit(self.gameover_font.render("GAME OVER", False,
             (255,255,255)), self.gameover_pos)
-      self.screen.blit(self.score_font.render('%d' % self.score,
+      self.screen.blit(self.score_font.render('%d' % self.player.score,
           False, (255,255,255)), (10,10))
       #self.screen.blit(self.score_font.render('{:,}'.format(self.score),
       #    False, (255,255,255)), (10,10))
@@ -834,7 +844,6 @@ class Main(object):
       self.player.draw()
       self.stats.counts['FPS'] = self.fps_timer.get_fps()
       self.stats.draw()
-      self.stats.reset()
       pygame.display.flip()
 
   def spawn_points_empty(self):
@@ -860,15 +869,18 @@ class Main(object):
 def parse_args():
   '''Parses the command line arguments and returns an option object.'''
   op = optparse.OptionParser()
-  op.set_defaults(config = '~/.linebattlesrc',
-                  input_type = 'none')
-  op.add_option('-C', '--config', help="Use a different config file.")
-  op.add_option('-j', '--input', dest='input_type',
-                type='choice', choices=('none','keyboard','joystick'),
-                help="Force use of the joystick.")
-  op.add_option('-s', '--size', default='800x600',
-                action='store', type='string',
+  op.set_defaults(size='800x600', fps=30, min_fps=25)
+
+  #op.add_option('-C', '--config', help="Use a different config file.")
+  #op.add_option('-j', '--input', dest='input_type',
+  #              type='choice', choices=('none','keyboard','joystick'),
+  #              help="Force use of the joystick.")
+  op.add_option('-s', '--size', type='string',
                 help="Set the window resolution.")
+  op.add_option('-f', '--fps', type='int',
+                help="Set the frame rate.")
+  op.add_option('-m', '--min-fps', type='int',
+                help="Set the minimum frame rate.")
   (options, args) = op.parse_args()
 
   try:
