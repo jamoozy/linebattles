@@ -16,7 +16,14 @@ from pygame.locals import *
 
 
 
+##########################################################################
+#                                   Debug                                #
+##########################################################################
+
 class Stats(object):
+  '''Keeps track of statistics about the game.  This counts variables
+  (distinguished by their string names), incrementing them by 1 for every
+  call to Stats#inc(varname).'''
   stats_object = None
   @staticmethod
   def get_stats(screen = None, size = None):
@@ -45,6 +52,7 @@ class Stats(object):
       self.counts[varname] = 1
 
   def draw(self):
+    '''Draw all the variables and their values on the screen.'''
     x = self.width - self.MARGIN
     y = self.MARGIN
     for key in self.counts:
@@ -192,61 +200,6 @@ class Player(Ship):
 
 
 ##########################################################################
-#                               Bullets                                  #
-##########################################################################
-
-class Bullet(object):
-  def __init__(self, screen, pos, traj, side):
-    self.screen = screen
-    self.pos = list(pos)
-    self.traj = traj
-    self.side = side
-    self.speed = 8
-    self.length = 10
-    self.color = 255,0,0
-
-  def collides(self, that):
-    return isinstance(that, Ship) and \
-        that._build_rect().collidepoint(self.pos)
-
-  def _calc_shift(self):
-    return [ self.speed * math.cos(self.traj),
-             self.speed * math.sin(self.traj) ]
-
-  def _calc_tail_pos(self):
-    return [ self.pos[0] - self.length * math.cos(self.traj),
-             self.pos[1] - self.length * math.sin(self.traj) ]
-
-  def draw(self):
-    pygame.draw.line(self.screen, self.color,
-                     self.pos, self._calc_tail_pos(), 2)
-
-  def tick(self):
-    self.move_forward()
-
-  def move_forward(self):
-    shift = self._calc_shift()
-    self.pos[0] += shift[0]
-    self.pos[1] += shift[1]
-
-class Gun(object):
-  SIDES = ('good', 'bad')
-
-  def __init__(self, screen, num_bullets, side = 'good'):
-    assert side in self.SIDES, 'Invalid side: %s' % side
-    self.screen = screen
-    self.power = num_bullets
-    self.side = side
-
-  def fire(self, pos, traj):
-    bullets = []
-    for i in xrange(-self.power, self.power + 1, 4):
-      bullets.append(Bullet(self.screen, pos, traj + i / 100., self.side))
-    return bullets
-
-
-
-##########################################################################
 #                               Baddies                                  #
 ##########################################################################
 
@@ -317,6 +270,67 @@ class Shooter(Baddie):
       return self._fire()
 
 
+
+
+##########################################################################
+#                           Guns / Bullets                               #
+##########################################################################
+
+class Bullet(object):
+  def __init__(self, screen, pos, traj, side):
+    self.screen = screen
+    self.pos = list(pos)
+    self.traj = traj
+    self.side = side
+    self.speed = 8
+    self.length = 10
+    self.color = 255,0,0
+
+  def collides(self, that):
+    return isinstance(that, Ship) and \
+        that._build_rect().collidepoint(self.pos)
+
+  def _calc_shift(self):
+    return [ self.speed * math.cos(self.traj),
+             self.speed * math.sin(self.traj) ]
+
+  def _calc_tail_pos(self):
+    return [ self.pos[0] - self.length * math.cos(self.traj),
+             self.pos[1] - self.length * math.sin(self.traj) ]
+
+  def draw(self):
+    pygame.draw.line(self.screen, self.color,
+                     self.pos, self._calc_tail_pos(), 2)
+
+  def tick(self):
+    self.move_forward()
+
+  def move_forward(self):
+    shift = self._calc_shift()
+    self.pos[0] += shift[0]
+    self.pos[1] += shift[1]
+
+class Gun(object):
+  SIDES = ('good', 'bad')
+
+  def __init__(self, screen, num_bullets, side = 'good'):
+    assert side in self.SIDES, 'Invalid side: %s' % side
+    self.screen = screen
+    self.power = num_bullets
+    self.side = side
+
+  def fire(self, pos, traj):
+    bullets = []
+    for i in xrange(-self.power, self.power + 1, 4):
+      bullets.append(Bullet(self.screen, pos, traj + i / 100., self.side))
+    return bullets
+
+
+
+##########################################################################
+#                         Spawn Points / Levels                          #
+##########################################################################
+
 class SpawnPoint(object):
   def __init__(self, screen, size, x, y, baddies_array):
     self.screen = screen
@@ -349,8 +363,6 @@ class SpawnPoint(object):
 
   def clear(self):
     self.queue = []
-
-
 
 class Level(object):
   def __init__(self, screen, size, spawn_point_array, greeting, progression):
@@ -422,6 +434,11 @@ class Level(object):
   def done(self):
     return self.prog_i >= len(self.progression)
 
+
+
+##########################################################################
+#                               User Input                               #
+##########################################################################
 
 class Input(object):
   def __init__(self, player, space):
@@ -504,9 +521,16 @@ class Input(object):
 
 
 
+##########################################################################
+#                          Collision Detection                           #
+##########################################################################
+
 class CollisionSpace(object):
-  BINSIZE = 50
-  BUFSIZE = .2
+  '''This is an implementation of sub-space partitioning collision
+  detection.'''
+
+  BINSIZE = 50  # 1-D size of each sub-space (bin)
+  BUFSIZE = .2  # 1-D percentage of overlapping space
 
   def __init__(self, size, player):
     self.size = self.width,self.height = size
@@ -659,9 +683,6 @@ class CollisionSpace(object):
           elif r_bin:
             bins.append((bin_i+1, bin_j+1))
 
-    #if self.player == obj:
-    #  print '           num bins:', len(bins)
-    #  sys.stdout.flush()
     return bins
 
   def _insert_baddie(self, b):
@@ -698,6 +719,10 @@ class CollisionSpace(object):
 
 
 
+##########################################################################
+#                 Main Object that brings things together ^_^            #
+##########################################################################
+
 class Main(object):
   def __init__(self, options):
     assert self.MAIN_OBJECT is None, "Another Main object is being created!"
@@ -731,9 +756,9 @@ class Main(object):
     self.winner_pos = (self.width - self.winner_pos[0]) / 2, \
                       (self.height - self.winner_pos[1]) / 2
     self.pause_font = pygame.font.SysFont('arial', 18, bold = True)
-    self.pause_pos = self.winner_font.size('Pause')
-    self.pause_pos = (self.width - self.winner_pos[0]) / 2, \
-                     (self.height - self.winner_pos[1]) / 2
+    self.pause_pos = self.pause_font.size('Pause')
+    self.pause_pos = (self.width - self.pause_pos[0]) / 2, \
+                     (self.height - self.pause_pos[1]) / 2
 
     self.space = CollisionSpace(self.size, self.player)
     self.user_input = Input(self.player, self.space)
