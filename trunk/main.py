@@ -90,7 +90,8 @@ class Ship(object):
     self.pos[0] += dx
     self.pos[1] += dy
 
-  def move_forward(self, amt):
+  def move_forward(self, amt = 1.):
+    assert amt >= 0 and amt <= 1, "amt out of range: %d" % amt
     self.rect = None
     speed = self.speed * amt
     self.pos[0] += math.cos(self.traj) * speed
@@ -195,19 +196,18 @@ class Player(Ship):
 ##########################################################################
 
 class Bullet(object):
-  def __init__(self, screen, pos, traj):
+  def __init__(self, screen, pos, traj, side):
     self.screen = screen
     self.pos = list(pos)
     self.traj = traj
+    self.side = side
     self.speed = 8
     self.length = 10
     self.color = 255,0,0
 
   def collides(self, that):
-    if not isinstance(that, Ship):
-      print 'Warning!  Bullet-non-Ship collision check???'
-      return False
-    return that._build_rect().collidepoint(self.pos)
+    return isinstance(that, Ship) and \
+        that._build_rect().collidepoint(self.pos)
 
   def _calc_shift(self):
     return [ self.speed * math.cos(self.traj),
@@ -230,14 +230,18 @@ class Bullet(object):
     self.pos[1] += shift[1]
 
 class Gun(object):
-  def __init__(self, screen, num_bullets = 1):
+  SIDES = ('good', 'bad')
+
+  def __init__(self, screen, num_bullets, side = 'good'):
+    assert side in self.SIDES, 'Invalid side: %s' % side
     self.screen = screen
     self.power = num_bullets
+    self.side = side
 
   def fire(self, pos, traj):
     bullets = []
     for i in xrange(-self.power, self.power + 1, 4):
-      bullets.append(Bullet(self.screen, pos, traj + i / 100.))
+      bullets.append(Bullet(self.screen, pos, traj + i / 100., self.side))
     return bullets
 
 
@@ -247,6 +251,8 @@ class Gun(object):
 ##########################################################################
 
 class Baddie(Ship):
+  '''A basic "bad guy".  This doesn't actually do anything, it just sets
+  up a ship in a "bad guy" kind of a way.'''
   def __init__(self, screen, color, pos, traj, size, geom):
     Ship.__init__(self, screen, color, geom, size = size)
     self.pos = list(pos)
@@ -259,6 +265,7 @@ class Baddie(Ship):
     print 'Warning: Baddie.tick() called'
 
 class Wiggler(Baddie):
+  '''A random walker "bad guy".'''
   def __init__(self, screen, pos, traj):
     Baddie.__init__(self, screen, (0,255,0), pos, traj, 5,
             ((1,1), (1,-1), (-1,-1), (-1, 1)))
@@ -272,19 +279,42 @@ class Wiggler(Baddie):
     self.move_forward(self.speed)
 
 class Homer(Baddie):
+  '''A fast "bad guy" that follows the player.'''
   def __init__(self, screen, pos, traj):
     Baddie.__init__(self, screen, (255,0,255), pos, traj, 5,
             ((2,0), (0,-1), (-2,0), (0,1)))
     self.speed = 2
-    self.dt = .01  # max change in traj
 
   def tick(self):
     '''Perform one frame of action.'''
     dx = Main.get_main().player.pos[0] - self.pos[0]
     dy = Main.get_main().player.pos[1] - self.pos[1]
     self.traj = math.atan2(dy, dx)
-    self.move_forward(self.speed)
+    self.move_forward()
 
+class Shooter(Baddie):
+  FIRE_RATE = 4000
+  def __init__(self, screen, pos, traj):
+    Baddie.__init__(self, screen, (255,0,127), pos, traj, 5,
+            ((1,0), (-1,-1), (-1,1)))
+    self.speed = 2
+    self.score = 200
+    self.gun = Gun(screen, 0, 'bad')
+    self.last_fired = 0
+
+  def _fire(self):
+    self.last_fired = pygame.time.get_ticks()
+    return self.gun.fire(self.pos, self.traj)
+
+  def okay_to_fire(self):
+    return self.last_fired + self.FIRE_RATE <= pygame.time.get_ticks()
+
+  def tick(self):
+    if random.randrange(100) < 1:
+      self.traj = random.randrange(200) * math.pi / 100
+    self.move_forward()
+    if self.okay_to_fire():
+      return self._fire()
 
 
 class SpawnPoint(object):
@@ -394,7 +424,9 @@ class Level(object):
 
 
 class Input(object):
-  def __init__(self):
+  def __init__(self, player, space):
+    self.player = player
+    self.space = space
     if pygame.joystick.get_count() > 0:
       self.js = pygame.joystick.Joystick(0)
       self.js.init()
@@ -406,13 +438,32 @@ class Input(object):
     else:
       self.js = None
 
+  def tick(self):
+    if self.js is None: self.keys = pygame.key.get_pressed()
+
+    js_dx = self.get_mx()
+    js_dy = self.get_my()
+    self.player.traj = math.atan2(js_dy, js_dx)
+    if abs(js_dx) > .1 or abs(js_dy) > .1:
+      amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
+      if amt > 1:
+        amt = 1.
+      elif amt < -1:
+        amt = -1.
+      self.player.move_forward(amt)
+
+    js_fx = self.get_fx()
+    js_fy = self.get_fy()
+    if abs(js_fx) > .1 or abs(js_fy) > .1:
+      for b in self.player.fire(math.atan2(js_fy, js_fx)):
+        self.space.add(b)
+
   def get_mx(self):
     '''Gets movement in the X direction (in [-1,1] for [left,right]).'''
     if self.js is None:
-      keys = pygame.key.get_pressed()
-      if keys[pygame.K_f]:
+      if self.keys[pygame.K_f]:
         return 1.
-      if keys[pygame.K_s]:
+      if self.keys[pygame.K_s]:
         return -1.
       return .0
     else:
@@ -421,10 +472,9 @@ class Input(object):
   def get_my(self):
     '''Gets movement in the Y direction (in [-1,1] for [top,bottom]).'''
     if self.js is None:
-      keys = pygame.key.get_pressed()
-      if keys[pygame.K_d]:
+      if self.keys[pygame.K_d]:
         return 1.
-      if keys[pygame.K_e]:
+      if self.keys[pygame.K_e]:
         return -1.
       return .0
     else:
@@ -433,10 +483,9 @@ class Input(object):
   def get_fx(self):
     '''Gets fire direction in X (in [-1,1] for [left,right]).'''
     if self.js is None:
-      keys = pygame.key.get_pressed()
-      if keys[pygame.K_l]:
+      if self.keys[pygame.K_l]:
         return 1.
-      if keys[pygame.K_j]:
+      if self.keys[pygame.K_j]:
         return -1.
       return .0
     else:
@@ -445,10 +494,9 @@ class Input(object):
   def get_fy(self):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
     if self.js is None:
-      keys = pygame.key.get_pressed()
-      if keys[pygame.K_k]:
+      if self.keys[pygame.K_k]:
         return 1.
-      if keys[pygame.K_i]:
+      if self.keys[pygame.K_i]:
         return -1.
       return .0
     else:
@@ -473,7 +521,11 @@ class CollisionSpace(object):
     while len(self.bullets) > 0: del self.bullets[0]
 
   def _tick_baddie(self, baddie):
-    baddie.tick()
+    buls = baddie.tick()
+    if buls is not None:
+      for b in buls:
+        self.add(b)
+
     rect = baddie._build_rect()
     if rect.left <= 0 or rect.right >= self.width:
       baddie.traj = math.pi - baddie.traj
@@ -498,8 +550,17 @@ class CollisionSpace(object):
         self.bins[i].append([])
 
     # update baddies and put them in their bins
-    for b in self.baddies:
-      self._tick_baddie(b)
+    for b in xrange(len(self.baddies)-1,-1,-1):
+      baddie = self.baddies[b]
+      if isinstance(baddie, Baddie):
+        self._tick_baddie(baddie)
+      elif isinstance(baddie, Bullet):
+        baddie.tick()
+        if baddie.pos[0] < 0 or baddie.pos[0] > self.width or \
+           baddie.pos[1] < 0 or baddie.pos[1] > self.height:
+          del self.baddies[b]
+        else:
+          self._insert_baddie(baddie)
 
     # update ship, bound in the square, and check collisions
     for i,j in self._get_bins_idxs(self.player):
@@ -618,7 +679,10 @@ class CollisionSpace(object):
 
   def add(self, obj):
     if isinstance(obj, Bullet):
-      self.bullets.append(obj)
+      if obj.side is 'good':
+        self.bullets.append(obj)
+      else:
+        self.baddies.append(obj)
     elif isinstance(obj, Baddie):
       self.baddies.append(obj)
     else:
@@ -639,18 +703,21 @@ class Main(object):
     assert self.MAIN_OBJECT is None, "Another Main object is being created!"
 
     pygame.init()
+
     self.size = self.width, self.height = options.size
     self.screen = pygame.display.set_mode(self.size, HWSURFACE | DOUBLEBUF)
     self.stats = Stats.get_stats(self.screen, self.size)
 
     self.player = Player.spawn_at(self.screen, self.width/2, self.height/2)
+
     self.paused = False
+    self.winner = False
 
     self.fps_timer = pygame.time.Clock()
     self.fps = options.fps
     self.min_fps = options.min_fps
-    if self.min_fps > self.fps:
-      self.min_fps = self.fps
+    assert self.min_fps <= self.fps, "min FPS larger than FPS: %d > %d" % \
+        (self.min_fps, self.fps)
 
     # fonts
     self.score_font = pygame.font.SysFont('courier', 25, bold = True)
@@ -663,9 +730,14 @@ class Main(object):
     self.winner_pos = self.winner_font.size('WINNER')
     self.winner_pos = (self.width - self.winner_pos[0]) / 2, \
                       (self.height - self.winner_pos[1]) / 2
+    self.pause_font = pygame.font.SysFont('arial', 18, bold = True)
+    self.pause_pos = self.winner_font.size('Pause')
+    self.pause_pos = (self.width - self.winner_pos[0]) / 2, \
+                     (self.height - self.winner_pos[1]) / 2
 
-    self.user_input = Input()
     self.space = CollisionSpace(self.size, self.player)
+    self.user_input = Input(self.player, self.space)
+
     dw, dh = .1 * self.width, .1 * self.height
     self.spawn_points = [
         SpawnPoint(self.screen, self.size, 0, 0, self.space.baddies),
@@ -675,13 +747,12 @@ class Main(object):
                 self.width, 0, self.space.baddies),
         SpawnPoint(self.screen, self.size,
                 self.width, self.height, self.space.baddies) ]
-    self.winner = False
 
     self.lev_i = 0
     self.levels = [ Level(self.screen, self.size, self.spawn_points,
                           "Level 1", [ (2e3, 0, Wiggler, 20),
                                        (2e3, 1, Wiggler, 20),
-                                       (2e3, 2, Homer,   20),
+                                       (2e3, 2, Wiggler, 20),
                                        (2e3, 3, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
                           "Level 2", [ (2e3, 0, Wiggler, 20),
@@ -693,11 +764,14 @@ class Main(object):
                                        (1e4, 1, Homer,   20),
                                        (1e4, 2, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
-                          "Level 3", [ (2e3, 0, Wiggler, 2000),
-                                       (2e3, 1, Wiggler, 2000),
-                                       (2e3, 2, Wiggler, 2000),
-                                       (2e3, 3, Wiggler, 2000),
-                                       (1e4, 3, Homer,   2000) ]) ]
+                          "Level 3", [ (2e3, 0, Wiggler, 100),
+                                       (2e3, 1, Wiggler, 100),
+                                       (2e3, 2, Wiggler, 100),
+                                       (2e3, 3, Wiggler, 100),
+                                       (2e4, 2, Shooter, 100),
+                                       (2e4, 2, Shooter, 100),
+                                       (2e4, 2, Homer,   100),
+                                       (4e4, 3, Homer,   100) ]) ]
 
 
   def tick(self):
@@ -711,23 +785,7 @@ class Main(object):
         self.space.empty()
         self.levels[self.lev_i].start()
     else:
-      js_dx = self.user_input.get_mx()
-      js_dy = self.user_input.get_my()
-      self.player.traj = math.atan2(js_dy, js_dx)
-      if abs(js_dx) > .1 or abs(js_dy) > .1:
-        amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
-        if amt > 1:
-          amt = 1.
-        elif amt < -1:
-          amt = -1.
-        self.player.move_forward(amt)
-
-      # Fire
-      js_fx = self.user_input.get_fx()
-      js_fy = self.user_input.get_fy()
-      if abs(js_fx) > .1 or abs(js_fy) > .1:
-        for b in self.player.fire(math.atan2(js_fy, js_fx)):
-          self.space.add(b)
+      self.user_input.tick()
 
 
       ##################################################################
@@ -833,13 +891,17 @@ class Main(object):
       if self.winner:
         self.screen.blit(self.winner_font.render("WINNER", False,
             (255,255,255)), self.winner_pos)
-      if self.player.exploding:
+      elif self.player.exploding:
         self.screen.blit(self.gameover_font.render("GAME OVER", False,
             (255,255,255)), self.gameover_pos)
+      elif self.paused:
+        self.screen.blit(self.pause_font.render("Paused", False,
+            (255,255,255)), self.pause_pos)
       self.screen.blit(self.score_font.render('%d' % self.player.score,
           False, (255,255,255)), (10,10))
       #self.screen.blit(self.score_font.render('{:,}'.format(self.score),
       #    False, (255,255,255)), (10,10))
+
 
       self.player.draw()
       self.stats.counts['FPS'] = self.fps_timer.get_fps()
@@ -881,7 +943,7 @@ def parse_args():
                 help="Set the frame rate.")
   op.add_option('-m', '--min-fps', type='int',
                 help="Set the minimum frame rate.")
-  (options, args) = op.parse_args()
+  options, args = op.parse_args()
 
   try:
     options.size = map(lambda x: int(x), options.size.split('x'))
@@ -891,6 +953,10 @@ def parse_args():
     if len(options.size) != 2:
       op.error('Invalid size parameter: "%s"' %
           reduce(lambda a,b: '%sx%s' % (a,b), options.size))
+
+  if options.min_fps > options.fps:
+    print 'Warning! min_fps:%d > fps:%d' % (options.min_fps, options.fps)
+    options.min_fps = options.fps
 
   if len(args) > 0:
     print 'Unrecognized option:', args[0]
