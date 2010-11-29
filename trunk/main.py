@@ -137,7 +137,7 @@ class Ship(object):
     pygame.draw.lines(self.screen, self.color, True, self._calc_global_ps())
 
   def collides(self, that):
-    if isinstance(that, Ship):
+    if isinstance(that, Ship) or isinstance(that, Upgrade):
       return self._build_rect().colliderect(that._build_rect())
     elif isinstance(that, Bullet):
       # Bullets vary greatly in how their collision detection
@@ -154,8 +154,8 @@ class Player(Ship):
   and stuff.'''
   def __init__(self, screen):
     Ship.__init__(self, screen, (200, 200, 255),
-                  [ [ 0, -1], [ 2, -1], [ 0, -2], [-2, -1],
-                    [-2,  1], [ 0,  2], [ 2,  1], [ 0,  1] ],
+                  ( ( 0, -1), ( 2, -1), ( 0, -2), (-2, -1),
+                    (-2,  1), ( 0,  2), ( 2,  1), ( 0,  1) ),
                   size = 5)
     self.screen = screen
     self.reset()
@@ -213,9 +213,13 @@ class Baddie(Ship):
     self.speed = 1
     self.score = 100
 
+  def upgrade(self):
+    '''Returns a tuple of upgrades (baddie-specific), which may be empty.'''
+    assert False, "Can't make instances of this class."
+
   def tick(self):
     '''Perform one frame of action.'''
-    print 'Warning: Baddie.tick() called'
+    assert False, "Can't make instances of this class."
 
 class Wiggler(Baddie):
   '''A random walker "bad guy".'''
@@ -223,6 +227,12 @@ class Wiggler(Baddie):
     Baddie.__init__(self, screen, (0,255,0), pos, traj, 5,
             ((1,1), (1,-1), (-1,-1), (-1, 1)))
     self.score = 200
+
+  def upgrade(self):
+    if random.randrange(200) < 1:
+      return (ExtraBullet(self.screen, self.pos),)
+    else:
+      return ()
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -237,6 +247,12 @@ class Homer(Baddie):
     Baddie.__init__(self, screen, (255,0,255), pos, traj, 5,
             ((2,0), (0,-1), (-2,0), (0,1)))
     self.speed = 2
+
+  def upgrade(self):
+    if random.randrange(300) < 1:
+      return (ExtraBullet(self.screen, self.pos),)
+    else:
+      return ()
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -254,6 +270,12 @@ class Shooter(Baddie):
     self.score = 200
     self.gun = Gun(screen, 0, 'bad')
     self.last_fired = 0
+
+  def upgrade(self):
+    if random.randrange(100) < 1:
+      return (ExtraBullet(self.screen, self.pos),)
+    else:
+      return ()
 
   def _fire(self):
     self.last_fired = pygame.time.get_ticks()
@@ -321,8 +343,8 @@ class Gun(object):
 
   def fire(self, pos, traj):
     bullets = []
-    for i in xrange(-self.power, self.power + 1, 4):
-      bullets.append(Bullet(self.screen, pos, traj + i / 100., self.side))
+    for i in xrange(-self.power, self.power + 1, 2):
+      bullets.append(Bullet(self.screen, pos, traj + i / 50., self.side))
     return bullets
 
 
@@ -550,6 +572,7 @@ class CollisionSpace(object):
       for b in buls:
         self.add(b)
 
+    # Bounce off the walls.
     rect = baddie._build_rect()
     if rect.left <= 0 or rect.right >= self.width:
       baddie.traj = math.pi - baddie.traj
@@ -557,13 +580,13 @@ class CollisionSpace(object):
         baddie.move(1,0)
       while baddie._build_rect().right >= self.width:
         baddie.move(-1,0)
-
     if rect.top <= 0 or rect.bottom >= self.height:
       baddie.traj = -baddie.traj
       while baddie._build_rect().top <= 0:
         baddie.move(0,1)
       while baddie._build_rect().bottom >= self.height:
         baddie.move(0,-1)
+
     self._insert_baddie(baddie)
 
   def tick(self):
@@ -576,7 +599,7 @@ class CollisionSpace(object):
     # update baddies and put them in their bins
     for b in xrange(len(self.baddies)-1,-1,-1):
       baddie = self.baddies[b]
-      if isinstance(baddie, Baddie):
+      if isinstance(baddie, Baddie) or isinstance(baddie, Upgrade):
         self._tick_baddie(baddie)
       elif isinstance(baddie, Bullet):
         baddie.tick()
@@ -585,13 +608,21 @@ class CollisionSpace(object):
           del self.baddies[b]
         else:
           self._insert_baddie(baddie)
+      else:
+        assert False, "Unrecognized type: %s" % str(type(baddie))
 
     # update ship, bound in the square, and check collisions
     for i,j in self._get_bins_idxs(self.player):
       for b in self.bins[i][j]:
         if b.collides(self.player):
-          self.player.explode()
-          break
+          if isinstance(b, Baddie) or isinstance(b, Bullet):
+            self.player.explode()
+            break
+          elif isinstance(b, Upgrade):
+            b.apply(self.player)
+            self._remove_baddie(b)
+          else:
+            assert False, "Unrecognized type: %s" % str(type(b))
       if self.player.exploding: break
 
     # update bullets and delete when O.O.B.
@@ -606,7 +637,11 @@ class CollisionSpace(object):
         for i,j in self._get_bins_idxs(self.bullets[b1]):
           for b2 in xrange(len(self.bins[i][j])-1,-1,-1):
             Stats.get_stats().inc("comparisons")
-            if self.bins[i][j][b2].collides(self.bullets[b1]):
+            if not isinstance(self.bins[i][j][b2], Upgrade) and \
+               self.bins[i][j][b2].collides(self.bullets[b1]):
+              if isinstance(self.bins[i][j][b2], Baddie):
+                for u in self.bins[i][j][b2].upgrade():
+                  self.baddies.append(u)
               self.player.score += self.bins[i][j][b2].score
               self._remove_bullet(self.bullets[b1])
               self._remove_baddie(self.bins[i][j][b2])
@@ -720,6 +755,77 @@ class CollisionSpace(object):
 
 
 ##########################################################################
+#                               Upgrades                                 #
+##########################################################################
+
+class Upgrade(object):
+  def __init__(self, screen, pos):
+    self.screen = screen
+    self.pos = list(pos)
+    self.color = ( random.randrange(256),
+                   random.randrange(256),
+                   random.randrange(256) )
+    self.traj = random.randrange(200) * math.pi / 100
+    self.rect = None
+
+  def move(self, dx, dy):
+    self.rect = None
+    self.pos = [ self.pos[0] + dx, self.pos[1] + dy ]
+
+  def collides(self, obj):
+    if isinstance(obj, Player):
+      return self._build_rect().colliderect(obj._build_rect())
+    return False
+
+  def _build_rect(self):
+    if self.rect is None:
+      self.rect = Rect(self.pos[0] - 10, self.pos[1] - 10, 20, 20)
+    return self.rect
+
+  def apply(self, player):
+    assert False, "Unimplemented upgrade!"
+
+  def tick(self):
+    self.rect = None
+    self.pos[0] += math.cos(self.traj)
+    self.pos[1] += math.sin(self.traj)
+
+  def _draw_one(self, rect):
+    pygame.draw.rect(self.screen, self.color, rect, 1)
+    pygame.draw.rect(self.screen, self.color + (80,), rect)
+
+  def draw(self):
+    '''Just draws the common outline.'''
+    self.color = ( (self.color[0] + random.randrange(-2, 2)) % 256,
+                   (self.color[1] + random.randrange(-2, 2)) % 256,
+                   (self.color[2] + random.randrange(-2, 2)) % 256 )
+    self._draw_one(pygame.Rect(self.pos[0] -10, self.pos[1] - 5,  2, 10))
+    self._draw_one(pygame.Rect(self.pos[0] + 8, self.pos[1] - 5,  2, 10))
+    self._draw_one(pygame.Rect(self.pos[0] - 5, self.pos[1] -10, 10,  2))
+    self._draw_one(pygame.Rect(self.pos[0] - 5, self.pos[1] + 8, 10,  2))
+
+class ExtraBullet(Upgrade):
+  def __init__(self, screen, pos):
+    Upgrade.__init__(self, screen, pos)
+
+  def apply(self, player):
+    player.gun.power += 1
+
+  def draw(self):
+    Upgrade.draw(self)
+    pygame.draw.line(self.screen, (255,0,0),
+        (self.pos[0], self.pos[1] - 5),
+        (self.pos[0], self.pos[1] + 5))
+    pygame.draw.line(self.screen, (255,0,0),
+        (self.pos[0] - 3, self.pos[1] - 6),
+        (self.pos[0] - 1, self.pos[1] + 4))
+    pygame.draw.line(self.screen, (255,0,0),
+        (self.pos[0] + 3, self.pos[1] - 6),
+        (self.pos[0] + 1, self.pos[1] + 4))
+
+
+
+##########################################################################
 #                 Main Object that brings things together ^_^            #
 ##########################################################################
 
@@ -798,7 +904,6 @@ class Main(object):
                                        (2e4, 2, Homer,   100),
                                        (4e4, 3, Homer,   100) ]) ]
 
-
   def tick(self):
     # Movement
     if self.player.exploding:
@@ -861,12 +966,13 @@ class Main(object):
       self.stats.reset()
 
       self.fps_timer.tick(self.fps)
-      if self.levels[self.lev_i].paused:
-        if self.fps_timer.get_fps() >= self.min_fps:
-          self.levels[self.lev_i].resume()
-      else:
-        if self.fps_timer.get_fps() < self.min_fps:
-          self.levels[self.lev_i].pause()
+      if self.lev_i < len(self.levels):
+        if self.levels[self.lev_i].paused:
+          if self.fps_timer.get_fps() >= self.min_fps:
+            self.levels[self.lev_i].resume()
+        else:
+          if self.fps_timer.get_fps() < self.min_fps:
+            self.levels[self.lev_i].pause()
 
 
       ####################################################################
