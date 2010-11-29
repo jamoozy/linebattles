@@ -229,10 +229,12 @@ class Wiggler(Baddie):
     self.score = 200
 
   def upgrade(self):
+    rtn = ()
     if random.randrange(200) < 1:
-      return (ExtraBullet(self.screen, self.pos),)
-    else:
-      return ()
+      rtn = (BulletUpgrade(self.screen, self.pos),)
+    if random.randrange(500) < 1:
+      rtn += (SpeedUpgrade(self.screen, self.pos),)
+    return rtn
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -249,10 +251,12 @@ class Homer(Baddie):
     self.speed = 2
 
   def upgrade(self):
+    rtn = ()
     if random.randrange(300) < 1:
-      return (ExtraBullet(self.screen, self.pos),)
-    else:
-      return ()
+      rtn += (BulletUpgrade(self.screen, self.pos),)
+    if random.randrange(100) < 1:
+      rtn += (SpeedUpgrade(self.screen, self.pos),)
+    return rtn
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -272,10 +276,12 @@ class Shooter(Baddie):
     self.last_fired = 0
 
   def upgrade(self):
+    rtn = ()
     if random.randrange(100) < 1:
-      return (ExtraBullet(self.screen, self.pos),)
-    else:
-      return ()
+      rtn += (BulletUpgrade(self.screen, self.pos),)
+    if random.randrange(400) < 1:
+      rtn += (SpeedUpgrade(self.screen, self.pos),)
+    return ()
 
   def _fire(self):
     self.last_fired = pygame.time.get_ticks()
@@ -611,6 +617,16 @@ class CollisionSpace(object):
       else:
         assert False, "Unrecognized type: %s" % str(type(baddie))
 
+    # Ensure the player is in bounds.
+    while self.player._build_rect().left <= 0:
+      self.player.move(1,0)
+    while self.player._build_rect().right >= self.width:
+      self.player.move(-1,0)
+    while self.player._build_rect().top <= 0:
+      self.player.move(0,1)
+    while self.player._build_rect().bottom >= self.height:
+      self.player.move(0,-1)
+
     # update ship, bound in the square, and check collisions
     for i,j in self._get_bins_idxs(self.player):
       for b in self.bins[i][j]:
@@ -804,7 +820,7 @@ class Upgrade(object):
     self._draw_one(pygame.Rect(self.pos[0] - 5, self.pos[1] -10, 10,  2))
     self._draw_one(pygame.Rect(self.pos[0] - 5, self.pos[1] + 8, 10,  2))
 
-class ExtraBullet(Upgrade):
+class BulletUpgrade(Upgrade):
   def __init__(self, screen, pos):
     Upgrade.__init__(self, screen, pos)
 
@@ -822,6 +838,24 @@ class ExtraBullet(Upgrade):
     pygame.draw.line(self.screen, (255,0,0),
         (self.pos[0] + 3, self.pos[1] - 6),
         (self.pos[0] + 1, self.pos[1] + 4))
+
+class SpeedUpgrade(Upgrade):
+  def __init__(self, screen, pos):
+    Upgrade.__init__(self, screen, pos)
+
+  def apply(self, player):
+    player.speed += 1
+
+  def draw(self):
+    Upgrade.draw(self)
+    pygame.draw.lines(self.screen, (255,0,0), False,
+        [ (self.pos[0] - 5, self.pos[1] - 5),
+          (self.pos[0], self.pos[1]),
+          (self.pos[0] - 5, self.pos[1] + 5) ] )
+    pygame.draw.lines(self.screen, (255,0,0), False,
+        [ (self.pos[0], self.pos[1] - 5),
+          (self.pos[0] + 5, self.pos[1]),
+          (self.pos[0], self.pos[1] + 5) ] )
 
 
 
@@ -913,23 +947,10 @@ class Main(object):
         self.player.reset()
         self.player.pos = [ self.width / 2, self.height / 2 ]
         self.space.empty()
+        self.lev_i = 0
         self.levels[self.lev_i].start()
     else:
       self.user_input.tick()
-
-
-      ##################################################################
-      #                      Collision Detection                       #
-      ##################################################################
-
-      while self.player._build_rect().left <= 0:
-        self.player.move(1,0)
-      while self.player._build_rect().right >= self.width:
-        self.player.move(-1,0)
-      while self.player._build_rect().top <= 0:
-        self.player.move(0,1)
-      while self.player._build_rect().bottom >= self.height:
-        self.player.move(0,-1)
 
 
     ####################################################################
