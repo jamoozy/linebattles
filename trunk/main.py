@@ -159,6 +159,8 @@ class Player(Ship):
                   size = 5)
     self.screen = screen
     self.reset()
+    self.shields = 0
+    self.radius = int(self.size * max([(i*i + j*j)**.5 for i,j in self.ps]))
 
   def reset(self):
     self.last_fire_time = 0
@@ -181,12 +183,29 @@ class Player(Ship):
     if self.exploding:
       self.expl_prog += .5
       pygame.draw.circle(self.screen, (255,0,0),
-          (int(self.pos[0]),int(self.pos[1])), int(self.expl_prog))
+          map(int, self.pos), int(self.expl_prog))
     else:
       Ship.draw(self)
+      if self.shields > 0:
+        r = 255
+        g = min(128 * ((self.shields / self.radius) % 3), 255)
+        b = min(128 * ((self.shields / (3 * self.radius))), 255)
+        if b == 255: g = 255
+        freq = .5 + 1.5 * ((self.shields % self.radius) - 1) / self.radius
+        a = 40 * (1 + math.sin(time.time() * math.pi * 2 * freq))
+        pygame.gfxdraw.filled_circle(self.screen, int(self.pos[0]),
+                int(self.pos[1]), self.radius, (r,g,b,a))
+        pygame.draw.circle(self.screen, (r,g,b), map(int, self.pos),
+                                                self.radius, 1)
 
   def fire(self, traj):
     return self.okay_to_fire() and self.gun.fire(self.pos, traj) or ()
+
+  def hit(self):
+    if self.shields <= 0:
+      self.explode()
+      return
+    self.shields -= 1
 
   def explode(self):
     self.exploding = True
@@ -232,8 +251,10 @@ class Wiggler(Baddie):
     rtn = ()
     if random.randrange(200) < 1:
       rtn = (BulletUpgrade(self.screen, self.pos),)
-    if random.randrange(500) < 1:
+    if random.randrange(200) < 1:
       rtn += (SpeedUpgrade(self.screen, self.pos),)
+    if random.randrange(200) < 1:
+      rtn += (ShieldUpgrade(self.screen, self.pos),)
     return rtn
 
   def tick(self):
@@ -256,6 +277,8 @@ class Homer(Baddie):
       rtn += (BulletUpgrade(self.screen, self.pos),)
     if random.randrange(100) < 1:
       rtn += (SpeedUpgrade(self.screen, self.pos),)
+    if random.randrange(200) < 1:
+      rtn += (ShieldUpgrade(self.screen, self.pos),)
     return rtn
 
   def tick(self):
@@ -281,6 +304,8 @@ class Shooter(Baddie):
       rtn += (BulletUpgrade(self.screen, self.pos),)
     if random.randrange(400) < 1:
       rtn += (SpeedUpgrade(self.screen, self.pos),)
+    if random.randrange(200) < 1:
+      rtn += (ShieldUpgrade(self.screen, self.pos),)
     return ()
 
   def _fire(self):
@@ -534,7 +559,7 @@ class Input(object):
         return -1.
       return .0
     else:
-      return self.js.get_axis(2)
+      return self.js.get_axis(3)
 
   def get_fy(self):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
@@ -545,7 +570,7 @@ class Input(object):
         return -1.
       return .0
     else:
-      return self.js.get_axis(3)
+      return self.js.get_axis(2)
 
 
 
@@ -629,16 +654,19 @@ class CollisionSpace(object):
 
     # update ship, bound in the square, and check collisions
     for i,j in self._get_bins_idxs(self.player):
-      for b in self.bins[i][j]:
-        if b.collides(self.player):
-          if isinstance(b, Baddie) or isinstance(b, Bullet):
-            self.player.explode()
+      for b in xrange(len(self.bins[i][j])-1,-1,-1):
+        if self.bins[i][j][b].collides(self.player):
+          if isinstance(self.bins[i][j][b], Baddie) or \
+              isinstance(self.bins[i][j][b], Bullet):
+            self.player.hit()
+            self._remove_baddie(self.bins[i][j][b])
             break
-          elif isinstance(b, Upgrade):
-            b.apply(self.player)
-            self._remove_baddie(b)
+          elif isinstance(self.bins[i][j][b], Upgrade):
+            self.bins[i][j][b].apply(self.player)
+            self._remove_baddie(self.bins[i][j][b])
           else:
-            assert False, "Unrecognized type: %s" % str(type(b))
+            assert False, "Unrecognized type: %s" % \
+                    str(type(self.bins[i][j][b]))
       if self.player.exploding: break
 
     # update bullets and delete when O.O.B.
@@ -821,9 +849,6 @@ class Upgrade(object):
     self._draw_one(pygame.Rect(self.pos[0] - 5, self.pos[1] + 8, 10,  2))
 
 class BulletUpgrade(Upgrade):
-  def __init__(self, screen, pos):
-    Upgrade.__init__(self, screen, pos)
-
   def apply(self, player):
     player.gun.power += 1
 
@@ -840,9 +865,6 @@ class BulletUpgrade(Upgrade):
         (self.pos[0] + 1, self.pos[1] + 4))
 
 class SpeedUpgrade(Upgrade):
-  def __init__(self, screen, pos):
-    Upgrade.__init__(self, screen, pos)
-
   def apply(self, player):
     player.speed += 1
 
@@ -856,6 +878,14 @@ class SpeedUpgrade(Upgrade):
         [ (self.pos[0], self.pos[1] - 5),
           (self.pos[0] + 5, self.pos[1]),
           (self.pos[0], self.pos[1] + 5) ] )
+
+class ShieldUpgrade(Upgrade):
+  def apply(self, player):
+    player.shields += 1
+
+  def draw(self):
+    Upgrade.draw(self)
+    pygame.draw.circle(self.screen, (255,0,0), map(int, self.pos), 5, 1)
 
 
 
@@ -1015,6 +1045,11 @@ class Main(object):
           elif event.key == pygame.K_LEFTBRACKET:
             if self.player.gun.power > 0:
               self.player.gun.power -= 1
+          elif event.key == pygame.K_0:
+            self.player.shields += 1
+          elif event.key == pygame.K_9:
+            if self.player.shields > 0:
+              self.player.shields -= 1
           elif event.key == pygame.K_p:
             self.paused = not self.paused
           elif event.key == pygame.K_F6:
