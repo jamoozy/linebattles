@@ -1,0 +1,14 @@
+Things left to do:
+
+1) Add configuration file parser.
+    --> ConfigParser.SafeConfigParser
+        (will be changed to configparser.SafeConfigParser in Python 3.0)
+
+2) Add sound effects.  That's one of the beauties of pygame!
+
+3) Add more baddies!
+
+4) Add more levels!
+
+5) Add more upgrades!
+  a) Rapid shot.
