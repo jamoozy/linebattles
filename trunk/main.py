@@ -262,7 +262,15 @@ class Wiggler(Baddie):
     self.traj += random.randrange(-100,100,1) / 1000.
     while self.traj > 2 * math.pi: self.traj -= 2 * math.pi
     while self.traj < 0: self.traj += 2 * math.pi
-    self.move_forward(self.speed)
+    self.move_forward(1)
+
+class FastWiggler(Wiggler):
+  '''Same as wiggler, but goes faster.'''
+  def __init__(self, screen, pos, traj):
+    Wiggler.__init__(self, screen, pos, traj)
+    self.color = (255,127,127)
+    self.speed = 2
+    self.score = 400
 
 class Homer(Baddie):
   '''A fast "bad guy" that follows the player.'''
@@ -950,7 +958,22 @@ class Main(object):
                                        (2e3, 2, Wiggler, 20),
                                        (2e3, 3, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
-                          "Level 2", [ (2e3, 0, Wiggler, 20),
+                          "Level 2", [ (2e3, 0, FastWiggler, 20),
+                                       (2e3, 1, FastWiggler, 20),
+                                       (2e3, 2, FastWiggler, 20),
+                                       (2e3, 3, FastWiggler, 20) ]),
+                    Level(self.screen, self.size, self.spawn_points,
+                          "Level 3", [ (2e3, 0, Homer, 20),
+                                       (2e3, 1, Homer, 20),
+                                       (2e3, 2, Homer, 20),
+                                       (2e3, 3, Homer, 20) ]),
+                    Level(self.screen, self.size, self.spawn_points,
+                          "Level 4", [ (2e3, 0, Shooter, 20),
+                                       (2e3, 1, Shooter, 20),
+                                       (2e3, 2, Shooter, 20),
+                                       (2e3, 3, Shooter, 20) ]),
+                    Level(self.screen, self.size, self.spawn_points,
+                          "Level 5", [ (2e3, 0, Wiggler, 20),
                                        (2e3, 1, Homer,   20),
                                        (2e3, 2, Wiggler, 20),
                                        (2e3, 3, Homer,   20),
@@ -959,14 +982,16 @@ class Main(object):
                                        (1e4, 1, Homer,   20),
                                        (1e4, 2, Wiggler, 20) ]),
                     Level(self.screen, self.size, self.spawn_points,
-                          "Level 3", [ (2e3, 0, Wiggler, 100),
-                                       (2e3, 1, Wiggler, 100),
-                                       (2e3, 2, Wiggler, 100),
-                                       (2e3, 3, Wiggler, 100),
-                                       (2e4, 2, Shooter, 100),
-                                       (2e4, 2, Shooter, 100),
-                                       (2e4, 2, Homer,   100),
-                                       (4e4, 3, Homer,   100) ]) ]
+                          "Level 6", [ (2e3, 0, Wiggler,     100),
+                                       (2e3, 1, Wiggler,     100),
+                                       (2e3, 2, Wiggler,     100),
+                                       (2e3, 3, Wiggler,     100),
+                                       (2e4, 2, Shooter,     100),
+                                       (2e4, 2, Shooter,     100),
+                                       (2e4, 2, Homer,       100),
+                                       (4e4, 3, Homer,       100),
+                                       (2e4, 2, FastWiggler, 100),
+                                       (4e4, 3, FastWiggler, 100) ]) ]
 
   def tick(self):
     # Movement
