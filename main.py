@@ -1,4 +1,18 @@
 #!/usr/bin/env python
+#
+# Line Battles is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 import sys
 import math
 import time
@@ -116,9 +130,9 @@ class Ship(object):
   def _calc_global_ps(self):
     st = math.sin(self.traj) * self.size
     ct = math.cos(self.traj) * self.size
-    return map(lambda p: [self.pos[0] + p[0] * ct - p[1] * st,
-                          self.pos[1] + p[1] * ct + p[0] * st],
-               self.ps)
+    return [ [ self.pos[0] + p[0] * ct - p[1] * st,
+               self.pos[1] + p[1] * ct + p[0] * st ],
+           for p in self.ps ]
 
   def _build_rect(self):
     if self.rect is None:
@@ -1158,13 +1172,12 @@ def parse_args():
   options, args = op.parse_args()
 
   try:
-    options.size = map(lambda x: int(x), options.size.split('x'))
+    options.size = map(int, options.size.split('x'))
   except ValueError:
     op.error('Invalid size parameter: "%s"' % options.size)
   finally:
     if len(options.size) != 2:
-      op.error('Invalid size parameter: "%s"' %
-          reduce(lambda a,b: '%sx%s' % (a,b), options.size))
+      op.error('Invalid size parameter: "%s"' % 'x'.join(options.size))
 
   if options.min_fps > options.fps:
     print 'Warning! min_fps:%d > fps:%d' % (options.min_fps, options.fps)
