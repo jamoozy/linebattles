@@ -39,11 +39,11 @@ class Stats(object):
   (distinguished by their string names), incrementing them by 1 for every
   call to Stats#inc(varname).'''
   stats_object = None
-  @staticmethod
-  def get_stats(screen = None, size = None):
-    if Stats.stats_object is None:
-      Stats.stats_object = Stats(screen, size)
-    return Stats.stats_object
+  @classmethod
+  def get_stats(cls, screen=None, size=None):
+    if cls.stats_object is None:
+      cls.stats_object = cls(screen, size)
+    return cls.stats_object
 
   MARGIN = 20
 
