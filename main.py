@@ -30,72 +30,117 @@ from pygame.locals import *
 
 
 
-##########################################################################
-#                                   Debug                                #
-##########################################################################
+################################################################################
+#                                    Debug                                     #
+################################################################################
 
 class Stats(object):
   '''Keeps track of statistics about the game.  This counts variables
-  (distinguished by their string names), incrementing them by 1 for every
-  call to Stats#inc(varname).'''
+  (distinguished by their string names), incrementing them by 1 for every call
+  to `Stats#inc(varname)`.'''
+
+  MARGIN = 20
+  '''The margin between HUD and edge of screen.'''
+
   stats_object = None
+  '''The singleton object.'''
+
   @classmethod
   def get_stats(cls, screen=None, size=None):
+    '''Gets the one and only `Stats` object.
+
+    Args:
+      screen, pygame.Screen: The screen.
+      size, (int,int): Width and height of the screen (in pixels).
+
+    Returns:
+      The one and only `Stats` object.
+    '''
     if cls.stats_object is None:
       cls.stats_object = cls(screen, size)
     return cls.stats_object
 
-  MARGIN = 20
-
   def __init__(self, screen, size):
+    '''Creates the statistics object.
+
+    Args:
+      screen, pygame.Screen: The screen.
+      size, (int,int): The width and height of the screen (in pixels).
+    '''
     self.screen = screen
     self.size = self.width,self.height = size
     self.font = pygame.font.SysFont("courier", 10, bold=True)
     self.counts = {}
 
-  def reset(self, varname = None):
+  def reset(self, varname=None):
+    '''Resets the variable name `varname` to be 0.
+
+    Args:
+      varname, str: The name of the `varname`.
+    '''
     if varname is None:
       self.counts = {}
     else:
       self.counts[varname] = 0
 
   def inc(self, varname):
-    if self.counts.has_key(varname):
-      self.counts[varname] += 1
-    else:
-      self.counts[varname] = 1
+    '''Increment a variable.  `varname` can be just about anything.
+
+    Args:
+      varname, str: The name of the variable.
+    '''
+    self.counts[varname] = 1 + (varname in self.counts and
+                                self.counts[varname] or 0)
+    return
 
   def draw(self):
     '''Draw all the variables and their values on the screen.'''
-    x = self.width - self.MARGIN
-    y = self.MARGIN
+    x, y = self.width - self.MARGIN, self.MARGIN
     for key in self.counts:
       string = "%s: % 8d" % (key, self.counts[key])
-      w,h = self.font.size(string)
-      self.screen.blit(self.font.render(string, True,
-              (255,255,255)), (x-w, y))
+      w, h = self.font.size(string)
+      self.screen.blit(self.font.render(string, True, (255, 255, 255)),
+                       (x-w, y))
       y += h
 
 
-class Ship(object):
+class Positional(object):
+  def move(self, delta):
+    '''Moves this element by the specified amount in the X and Y directions.
+
+    Args:
+      delta, (int,int): Amount to increment this ship's position by.
+
+    Returns:
+      (int,int): The ship's new (X,Y) position.
+    '''
+    self.rect = None
+    self.pos[0] += delta[0]
+    self.pos[1] += delta[1]
+    return self.pos
+
+
+class Ship(Positional):
   '''This class is used for drawing, mainly.  Just pass it some points
   and things, and it'll handle the rest!'''
   def __init__(self, screen, color, points, pos=(0,0), traj=0, size=10):
-    '''Create this!
-    screen: The screen to draw on
-    color: The color to draw
-    points: Points consisting of the line-art
-    pos: Initial position of the ship
-    traj: Initial trajectory (0 radians is to the left, .5pi is down)
-    size: Size of the ship.
-
+    '''Create a ship.
     Something perhaps non-trivial, is that the size parameter is in pixels,
     but so are the points.  So if the size is 5 but there's a point in the
     points list that's something like "(40,80)", then the effect will be that
     the effectual size of the ship will be sqrt(40**2+80**2) * 5 = 447.2, so
     beware.  It is recommended that you try to keep the values in the points
-    argument to <= 1.'''
+    argument to <= 1.
 
+    Args:
+      screen, pygame.Surface: The screen to draw on.
+      color, (int,int,int): The (R,G,B) color to draw.
+      point, [int]: Points consisting of the line-art
+      pos, (int,int): Initial (X,Y) position of the ship
+      traj, (int,int): Initial (X,Y) trajectory (0 radians is to the left, 0.5pi
+                       is down)
+      size, (int,int): Size (w,h) of the ship.
+    '''
     self.screen = screen
     self.color = color
     self.ps = points
@@ -104,15 +149,19 @@ class Ship(object):
     self.size = size
     self.speed = 2  # really more like the max speed
 
-    # rect ensures the bbox for this is calculated at most once per tick
+    # `rect ensures the `bbox` for this is calculated at most once per tick.
     self.rect = None   # i.e., not up-to-date
 
-  def move(self, dx, dy):
-    self.rect = None
-    self.pos[0] += dx
-    self.pos[1] += dy
+  def move_forward(self, amt=1.0):
+    '''Moves forward relative to this ship's trajectory, `self.traj`.
 
-  def move_forward(self, amt = 1.):
+    Args:
+      amt, float: The amount to move by w.r.t. this ship's speed, `self.speed`.
+          1.0 is "full speed" and 0.0 is not at all.
+
+    Throws:
+      AssertionError: Iff `amt` is O.O.B.
+    '''
     assert amt >= 0 and amt <= 1, "amt out of range: %d" % amt
     self.rect = None
     speed = self.speed * amt
@@ -120,6 +169,7 @@ class Ship(object):
     self.pos[1] += math.sin(self.traj) * speed
 
   def rotate(self, dt):
+    
     self.rect = None
     self.traj += dt
     while self.traj > 2 * math.pi:
@@ -131,7 +181,7 @@ class Ship(object):
     st = math.sin(self.traj) * self.size
     ct = math.cos(self.traj) * self.size
     return [ [ self.pos[0] + p[0] * ct - p[1] * st,
-               self.pos[1] + p[1] * ct + p[0] * st ],
+               self.pos[1] + p[1] * ct + p[0] * st ]
            for p in self.ps ]
 
   def _build_rect(self):
@@ -167,10 +217,10 @@ class Player(Ship):
   '''This should be unique in that it's the only ship that can also fire guns
   and stuff.'''
   def __init__(self, screen):
-    Ship.__init__(self, screen, (200, 200, 255),
-                  ( ( 0, -1), ( 2, -1), ( 0, -2), (-2, -1),
-                    (-2,  1), ( 0,  2), ( 2,  1), ( 0,  1) ),
-                  size = 5)
+    super().__init__(self, screen, (200, 200, 255),
+                     ((0, -1), (2, -1), (0, -2), (-2, -1),
+                      (-2, 1), (0, 2), (2, 1), (0, 1)),
+                     size = 5)
     self.screen = screen
     self.reset()
     self.shields = 0
@@ -184,7 +234,6 @@ class Player(Ship):
     self.gun = Gun(self.screen, 0)
     self.speed = 4
     self.score = 0
-
 
   def okay_to_fire(self):
     ticks = pygame.time.get_ticks()
@@ -254,29 +303,36 @@ class Baddie(Ship):
     '''Perform one frame of action.'''
     assert False, "Can't make instances of this class."
 
+  def _calc_upgrade(self, **kwargs):
+    return [eval("%s(self.screen, self.pos)" % kw) for kw in kwargs]
+
+
 class Wiggler(Baddie):
   '''A random walker "bad guy".'''
   def __init__(self, screen, pos, traj):
-    Baddie.__init__(self, screen, (0,255,0), pos, traj, 5,
+    super(self).__init__(screen, (0,255,0), pos, traj, 5,
             ((1,1), (1,-1), (-1,-1), (-1, 1)))
     self.score = 200
 
   def upgrade(self):
-    rtn = ()
-    if random.randrange(200) < 1:
-      rtn = (BulletUpgrade(self.screen, self.pos),)
-    if random.randrange(200) < 1:
-      rtn += (SpeedUpgrade(self.screen, self.pos),)
-    if random.randrange(200) < 1:
-      rtn += (ShieldUpgrade(self.screen, self.pos),)
-    return rtn
+    '''Returns one or many upgrades based on probability.
+
+    Returns:
+      Upgrade: The upgrade this returns on death.
+    '''
+    return super()._calc_upgrade(BulletUpgrade=200,
+                                 SpeedUpgrade=200,
+                                 ShieldUpgrade=200)
 
   def tick(self):
     '''Perform one frame of action.'''
     self.traj += random.randrange(-100,100,1) / 1000.
-    while self.traj > 2 * math.pi: self.traj -= 2 * math.pi
-    while self.traj < 0: self.traj += 2 * math.pi
+    while self.traj > 2 * math.pi:
+      self.traj -= 2 * math.pi
+    while self.traj < 0:
+      self.traj += 2 * math.pi
     self.move_forward(1)
+
 
 class FastWiggler(Wiggler):
   '''Same as wiggler, but goes faster.'''
@@ -286,6 +342,7 @@ class FastWiggler(Wiggler):
     self.speed = 2
     self.score = 400
 
+
 class Homer(Baddie):
   '''A fast "bad guy" that follows the player.'''
   def __init__(self, screen, pos, traj):
@@ -294,14 +351,14 @@ class Homer(Baddie):
     self.speed = 2
 
   def upgrade(self):
-    rtn = ()
-    if random.randrange(300) < 1:
-      rtn += (BulletUpgrade(self.screen, self.pos),)
-    if random.randrange(100) < 1:
-      rtn += (SpeedUpgrade(self.screen, self.pos),)
-    if random.randrange(200) < 1:
-      rtn += (ShieldUpgrade(self.screen, self.pos),)
-    return rtn
+    '''Returns one or many upgrades based on probability.
+
+    Returns:
+      Upgrade: The upgrade this returns on death.
+    '''
+    return super()._calc_upgrade(BulletUpgrade=300,
+                                 SpeedUpgrade=100,
+                                 ShieldUpgrade=200)
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -321,14 +378,14 @@ class Shooter(Baddie):
     self.last_fired = 0
 
   def upgrade(self):
-    rtn = ()
-    if random.randrange(100) < 1:
-      rtn += (BulletUpgrade(self.screen, self.pos),)
-    if random.randrange(400) < 1:
-      rtn += (SpeedUpgrade(self.screen, self.pos),)
-    if random.randrange(200) < 1:
-      rtn += (ShieldUpgrade(self.screen, self.pos),)
-    return ()
+    '''Returns one or many upgrades based on probability.
+
+    Returns:
+      Upgrade: The upgrade this returns on death.
+    '''
+    return super()._calc_upgrade(BulletUpgrade=100,
+                                 SpeedUpgrade=400,
+                                 ShieldUpgrade=200)
 
   def _fire(self):
     self.last_fired = pygame.time.get_ticks()
@@ -525,74 +582,52 @@ class Input(object):
       if self.js.get_numaxes() < 4:
         self.js.quit()
         self.js = None
+        logger.wrn("Could joystick does not have at least 4 axes. (%d)" %
+            self.js.get_numaxes())
         return
       print 'using %d axes' % self.js.get_numaxes()
     else:
       self.js = None
 
   def tick(self):
-    if self.js is None: self.keys = pygame.key.get_pressed()
+    keys = pygame.key.get_pressed() if self.js is None else None
 
-    js_dx = self.get_mx()
-    js_dy = self.get_my()
+    js_dx = self._get_mx(keys)
+    js_dy = self._get_my(keys)
     self.player.traj = math.atan2(js_dy, js_dx)
-    if abs(js_dx) > .1 or abs(js_dy) > .1:
+    if abs(js_dx) > 0.1 or abs(js_dy) > 0.1:
       amt = math.sqrt(js_dx * js_dx + js_dy * js_dy)
-      if amt > 1:
-        amt = 1.
-      elif amt < -1:
-        amt = -1.
-      self.player.move_forward(amt)
+      self.player.move_forward(1.0 if amt > 1 else -1.0 if amt < -1 else amt)
 
-    js_fx = self.get_fx()
-    js_fy = self.get_fy()
-    if abs(js_fx) > .1 or abs(js_fy) > .1:
+    js_fx = self._get_fx(keys)
+    js_fy = self._get_fy(keys)
+    if abs(js_fx) > 0.1 or abs(js_fy) > 0.1:
       for b in self.player.fire(math.atan2(js_fy, js_fx)):
         self.space.add(b)
 
-  def get_mx(self):
+  def _get_mx(self, keys):
     '''Gets movement in the X direction (in [-1,1] for [left,right]).'''
     if self.js is None:
-      if self.keys[pygame.K_f]:
-        return 1.
-      if self.keys[pygame.K_s]:
-        return -1.
-      return .0
-    else:
-      return self.js.get_axis(0)
+      return 1.0 if keys[pygame.K_f] else -1.0 if keys[pygame.K_s] else 0.0
+    return self.js.get_axis(0)
 
-  def get_my(self):
+  def _get_my(self, keys):
     '''Gets movement in the Y direction (in [-1,1] for [top,bottom]).'''
     if self.js is None:
-      if self.keys[pygame.K_d]:
-        return 1.
-      if self.keys[pygame.K_e]:
-        return -1.
-      return .0
-    else:
-      return self.js.get_axis(1)
+      return 1.0 if keys[pygame.K_d] else -1.0 if keys[pygame.K_e] else 0.0
+    return self.js.get_axis(1)
 
-  def get_fx(self):
+  def _get_fx(self, keys):
     '''Gets fire direction in X (in [-1,1] for [left,right]).'''
     if self.js is None:
-      if self.keys[pygame.K_l]:
-        return 1.
-      if self.keys[pygame.K_j]:
-        return -1.
-      return .0
-    else:
-      return self.js.get_axis(3)
+      return 1.0 if keys[pygame.K_l] else -1.0 if keys[pygame.K_j] else 0.0
+    return self.js.get_axis(3)
 
-  def get_fy(self):
+  def _get_fy(self, keys):
     '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
     if self.js is None:
-      if self.keys[pygame.K_k]:
-        return 1.
-      if self.keys[pygame.K_i]:
-        return -1.
-      return .0
-    else:
-      return self.js.get_axis(2)
+      return 1.0 if keys[pygame.K_k] else -1.0 if keys[pygame.K_i] else 0.0
+    return self.js.get_axis(2)
 
 
 
@@ -834,9 +869,17 @@ class Upgrade(object):
     self.traj = random.randrange(200) * math.pi / 100
     self.rect = None
 
-  def move(self, dx, dy):
+  def move(self, *delta):
+    '''Moves the upgrade by the specified change.
+
+    Args:
+      delta, (int,int): The change in (X,Y) to move the upgrade by.
+    '''
+    assert len(delta) == 2, 'Expected 2 arguments.'
     self.rect = None
-    self.pos = [ self.pos[0] + dx, self.pos[1] + dy ]
+    self.pos[0] += delta[0]
+    self.pos[1] += delta[1]
+    return self.pos
 
   def collides(self, obj):
     if isinstance(obj, Player):
