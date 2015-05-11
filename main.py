@@ -19,7 +19,7 @@ import time
 import random
 random.seed(time.time())
 
-import optparse
+import argparse
 
 #from OpenGL.GL import *
 #from OpenGL.GLU import *
@@ -280,9 +280,9 @@ class Player(Ship):
 
 
 
-##########################################################################
-#                               Baddies                                  #
-##########################################################################
+################################################################################
+#                                   Baddies                                    #
+################################################################################
 
 class Baddie(Ship):
   '''A basic "bad guy".  This doesn't actually do anything, it just sets
@@ -414,9 +414,9 @@ class Shooter(Baddie):
 
 
 
-##########################################################################
-#                           Guns / Bullets                               #
-##########################################################################
+################################################################################
+#                                Guns / Bullets                                #
+################################################################################
 
 class Bullet(object):
   def __init__(self, screen, pos, traj, side):
@@ -469,9 +469,9 @@ class Gun(object):
 
 
 
-##########################################################################
-#                         Spawn Points / Levels                          #
-##########################################################################
+################################################################################
+#                            Spawn Points / Levels                             #
+################################################################################
 
 class SpawnPoint(object):
   def __init__(self, screen, size, x, y, baddies_array):
@@ -578,12 +578,18 @@ class Level(object):
 
 
 
-##########################################################################
-#                               User Input                               #
-##########################################################################
+################################################################################
+#                                  User Input                                  #
+################################################################################
 
 class Input(object):
   def __init__(self, player, space):
+    '''
+
+    Args:
+      player, Player: The player.
+      space, CollisionSpace: The space where collisions are computed..
+    '''
     self.player = player
     self.space = space
     if pygame.joystick.get_count() > 0:
@@ -600,6 +606,7 @@ class Input(object):
       self.js = None
 
   def tick(self):
+    '''Do one tick; handles input.'''
     keys = pygame.key.get_pressed() if self.js is None else None
 
     js_dx = self._get_mx(keys)
@@ -616,34 +623,50 @@ class Input(object):
         self.space.add(b)
 
   def _get_mx(self, keys):
-    '''Gets movement in the X direction (in [-1,1] for [left,right]).'''
+    '''Gets movement in the X direction (in [-1,1] for [left,right]).
+
+    Args:
+      keys, [bool]: Array of key states.
+    '''
     if self.js is None:
       return 1.0 if keys[pygame.K_f] else -1.0 if keys[pygame.K_s] else 0.0
     return self.js.get_axis(0)
 
   def _get_my(self, keys):
-    '''Gets movement in the Y direction (in [-1,1] for [top,bottom]).'''
+    '''Gets movement in the Y direction (in [-1,1] for [top,bottom]).
+
+    Args:
+      keys, [bool]: Array of key states.
+    '''
     if self.js is None:
       return 1.0 if keys[pygame.K_d] else -1.0 if keys[pygame.K_e] else 0.0
     return self.js.get_axis(1)
 
   def _get_fx(self, keys):
-    '''Gets fire direction in X (in [-1,1] for [left,right]).'''
+    '''Gets fire direction in X (in [-1,1] for [left,right]).
+
+    Args:
+      keys, [bool]: Array of key states.
+    '''
     if self.js is None:
       return 1.0 if keys[pygame.K_l] else -1.0 if keys[pygame.K_j] else 0.0
     return self.js.get_axis(3)
 
   def _get_fy(self, keys):
-    '''Gets fire direction in Y (in [-1,1] for [top,bottom]).'''
+    '''Gets fire direction in Y (in [-1,1] for [top,bottom]).
+
+    Args:
+      keys, [bool]: Array of key states.
+    '''
     if self.js is None:
       return 1.0 if keys[pygame.K_k] else -1.0 if keys[pygame.K_i] else 0.0
     return self.js.get_axis(2)
 
 
 
-##########################################################################
-#                          Collision Detection                           #
-##########################################################################
+################################################################################
+#                             Collision Detection                              #
+################################################################################
 
 class CollisionSpace(object):
   '''This is an implementation of sub-space partitioning collision
@@ -865,9 +888,9 @@ class CollisionSpace(object):
 
 
 
-##########################################################################
-#                               Upgrades                                 #
-##########################################################################
+################################################################################
+#                                   Upgrades                                   #
+################################################################################
 
 class Upgrade(object):
   def __init__(self, screen, pos):
@@ -964,9 +987,9 @@ class ShieldUpgrade(Upgrade):
 
 
 
-##########################################################################
-#                 Main Object that brings things together ^_^            #
-##########################################################################
+################################################################################
+#                                     Main                                     #
+################################################################################
 
 class Main(object):
   def __init__(self, options):
@@ -1075,9 +1098,9 @@ class Main(object):
       self.user_input.tick()
 
 
-    ####################################################################
-    #                        Level Progression                         #
-    ####################################################################
+    ########################################################################
+    #                          Level Progression                           #
+    ########################################################################
 
     if self.lev_i < len(self.levels) and self.no_more_baddies():
       if self.levels[self.lev_i].done():
@@ -1098,13 +1121,8 @@ class Main(object):
 
 
   def run(self):
-
-    ######################################################################
-    #                              Main Loop                             #
-    ######################################################################
-
+    '''Runs the game's main loop.'''
     self.levels[self.lev_i].start()
-
     while True:
       self.stats.reset()
 
@@ -1127,11 +1145,11 @@ class Main(object):
         if event.type == pygame.QUIT:
           sys.exit()
         if event.type == pygame.KEYUP:
-          if (event.key == pygame.K_q or event.key == pygame.K_w) and \
-             (event.mod == pygame.K_RCTRL or event.mod == pygame.K_LCTRL):
+          if ((event.key == pygame.K_q or event.key == pygame.K_w) and
+              (event.mod == pygame.K_RCTRL or event.mod == pygame.K_LCTRL)):
             sys.exit()
           elif event.key == pygame.K_F7:
-            self.spawn_points[random.randrange(len(self.spawn_points))].spawn()
+            random.choice(self.spawn_points).spawn()
           elif event.key == pygame.K_RIGHTBRACKET:
             self.player.gun.power += 1
           elif event.key == pygame.K_LEFTBRACKET:
@@ -1181,7 +1199,6 @@ class Main(object):
       #self.screen.blit(self.score_font.render('{:,}'.format(self.score),
       #    False, (255,255,255)), (10,10))
 
-
       self.player.draw()
       self.stats.counts['FPS'] = self.fps_timer.get_fps()
       self.stats.draw()
@@ -1209,38 +1226,34 @@ class Main(object):
 
 def parse_args():
   '''Parses the command line arguments and returns an option object.'''
-  op = optparse.OptionParser()
-  op.set_defaults(size='800x600', fps=30, min_fps=25)
+  ap = argparse.ArgumentParser()
+  ap.set_defaults(size='800x600', fps=30, min_fps=25)
 
-  #op.add_option('-C', '--config', help="Use a different config file.")
-  #op.add_option('-j', '--input', dest='input_type',
-  #              type='choice', choices=('none','keyboard','joystick'),
-  #              help="Force use of the joystick.")
-  op.add_option('-s', '--size', type='string',
-                help="Set the window resolution.")
-  op.add_option('-f', '--fps', type='int',
-                help="Set the frame rate.")
-  op.add_option('-m', '--min-fps', type='int',
-                help="Set the minimum frame rate.")
-  options, args = op.parse_args()
+  #ap.add_argument('-C', '--config', help="Use a different config file.")
+  #ap.add_argument('-j', '--input', dest='input_type',
+  #                type='choice', choices=('none','keyboard','joystick'),
+  #                help="Force use of the joystick.")
+  ap.add_argument('-s', '--size', type=str,
+                  help="Set the window resolution.")
+  ap.add_argument('-f', '--fps', type=int,
+                  help="Set the frame rate.")
+  ap.add_argument('-m', '--min-fps', type=int,
+                  help="Set the minimum frame rate.")
+  args = ap.parse_args()
 
   try:
-    options.size = map(int, options.size.split('x'))
+    args.size = map(int, args.size.split('x'))
   except ValueError:
-    op.error('Invalid size parameter: "%s"' % options.size)
+    ap.error('Invalid size parameter: "%s"' % args.size)
   finally:
-    if len(options.size) != 2:
-      op.error('Invalid size parameter: "%s"' % 'x'.join(options.size))
+    if len(args.size) != 2:
+      ap.error('Invalid size parameter: "%s"' % 'x'.join(args.size))
 
-  if options.min_fps > options.fps:
-    print 'Warning! min_fps:%d > fps:%d' % (options.min_fps, options.fps)
-    options.min_fps = options.fps
+  if args.min_fps > args.fps:
+    print 'Warning! min_fps:%d > fps:%d' % (args.min_fps, args.fps)
+    args.min_fps = args.fps
 
-  if len(args) > 0:
-    print 'Unrecognized option:', args[0]
-    sys.exit()
-
-  return options
+  return args
 
 
 if __name__ == '__main__':
