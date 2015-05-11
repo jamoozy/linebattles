@@ -105,7 +105,7 @@ class Stats(object):
 
 
 class Positional(object):
-  def move(self, delta):
+  def move(self, *delta):
     '''Moves this element by the specified amount in the X and Y directions.
 
     Args:
@@ -125,17 +125,17 @@ class Ship(Positional):
   and things, and it'll handle the rest!'''
   def __init__(self, screen, color, points, pos=(0,0), traj=0, size=10):
     '''Create a ship.
-    Something perhaps non-trivial, is that the size parameter is in pixels,
-    but so are the points.  So if the size is 5 but there's a point in the
-    points list that's something like "(40,80)", then the effect will be that
-    the effectual size of the ship will be sqrt(40**2+80**2) * 5 = 447.2, so
-    beware.  It is recommended that you try to keep the values in the points
-    argument to <= 1.
+
+    A nontrivial detail: the size parameter is in pixels, but so are the points.
+    So if the size is 5 but there's a point in the points list that's something
+    like "(40,80)", then the effect will be that the effectual size of the ship
+    will be sqrt(40**2+80**2) * 5 = 447.2, so beware.  It is recommended that
+    you try to keep the values in the points argument to <= 1.
 
     Args:
       screen, pygame.Surface: The screen to draw on.
       color, (int,int,int): The (R,G,B) color to draw.
-      point, [int]: Points consisting of the line-art
+      points, [int]: Points consisting of the line-art
       pos, (int,int): Initial (X,Y) position of the ship
       traj, (int,int): Initial (X,Y) trajectory (0 radians is to the left, 0.5pi
                        is down)
@@ -169,7 +169,6 @@ class Ship(Positional):
     self.pos[1] += math.sin(self.traj) * speed
 
   def rotate(self, dt):
-    
     self.rect = None
     self.traj += dt
     while self.traj > 2 * math.pi:
@@ -180,16 +179,16 @@ class Ship(Positional):
   def _calc_global_ps(self):
     st = math.sin(self.traj) * self.size
     ct = math.cos(self.traj) * self.size
-    return [ [ self.pos[0] + p[0] * ct - p[1] * st,
-               self.pos[1] + p[1] * ct + p[0] * st ]
-           for p in self.ps ]
+    return [(self.pos[0] + p[0] * ct - p[1] * st,
+             self.pos[1] + p[1] * ct + p[0] * st)
+            for p in self.ps]
 
   def _build_rect(self):
     if self.rect is None:
       ps = self._calc_global_ps()
-      self.rect = pygame.Rect(ps[0],(0,0))
-      for i in xrange(1,len(ps)):
-        self.rect.union_ip(pygame.Rect(ps[i], (0,0)))
+      self.rect = pygame.Rect(ps[0], (0, 0))
+      for p in ps[1:]:
+        self.rect.union_ip(pygame.Rect(p, (0, 0)))
     return self.rect
 
   def center(self):
@@ -217,10 +216,10 @@ class Player(Ship):
   '''This should be unique in that it's the only ship that can also fire guns
   and stuff.'''
   def __init__(self, screen):
-    super().__init__(self, screen, (200, 200, 255),
-                     ((0, -1), (2, -1), (0, -2), (-2, -1),
-                      (-2, 1), (0, 2), (2, 1), (0, 1)),
-                     size = 5)
+    super(Player, self).__init__(screen, (200, 200, 255),
+                                 ((0, -1), (2, -1), (0, -2), (-2, -1),
+                                  (-2, 1), (0, 2), (2, 1), (0, 1)),
+                                 size = 5)
     self.screen = screen
     self.reset()
     self.shields = 0
@@ -273,9 +272,9 @@ class Player(Ship):
   def explode(self):
     self.exploding = True
 
-  @staticmethod
-  def spawn_at(screen, x, y):
-    ship = Player(screen)
+  @classmethod
+  def spawn_at(cls, screen, x, y):
+    ship = cls(screen)
     ship.pos = [x,y]
     return ship
 
@@ -289,7 +288,7 @@ class Baddie(Ship):
   '''A basic "bad guy".  This doesn't actually do anything, it just sets
   up a ship in a "bad guy" kind of a way.'''
   def __init__(self, screen, color, pos, traj, size, geom):
-    Ship.__init__(self, screen, color, geom, size = size)
+    super(Baddie, self).__init__(screen, color, geom, size = size)
     self.pos = list(pos)
     self.traj = traj
     self.speed = 1
@@ -304,13 +303,24 @@ class Baddie(Ship):
     assert False, "Can't make instances of this class."
 
   def _calc_upgrade(self, **kwargs):
-    return [eval("%s(self.screen, self.pos)" % kw) for kw in kwargs]
+    '''Calculates what upgrades to give based on `kwargs`.  Each argument name
+    is interpreted as a class name and each argument value is interpreted as the
+    chance that the class will be added.  For example, passing:
+        BulletUpgrade=200
+    means that a BulletUpgrade should be included with a 1/200 chance.
+
+    Args:
+      kwargs: The names and changes of spawning specific classes.
+    '''
+    return [eval("%s(self.screen, self.pos)" % k)
+            for k, v in kwargs.iteritems()
+            if random.randrange(v) < 1]
 
 
 class Wiggler(Baddie):
   '''A random walker "bad guy".'''
   def __init__(self, screen, pos, traj):
-    super(self).__init__(screen, (0,255,0), pos, traj, 5,
+    super(Wiggler, self).__init__(screen, (0,255,0), pos, traj, 5,
             ((1,1), (1,-1), (-1,-1), (-1, 1)))
     self.score = 200
 
@@ -320,9 +330,9 @@ class Wiggler(Baddie):
     Returns:
       Upgrade: The upgrade this returns on death.
     '''
-    return super()._calc_upgrade(BulletUpgrade=200,
-                                 SpeedUpgrade=200,
-                                 ShieldUpgrade=200)
+    return super(Wiggler, self)._calc_upgrade(BulletUpgrade=200,
+                                              SpeedUpgrade=200,
+                                              ShieldUpgrade=200)
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -337,7 +347,7 @@ class Wiggler(Baddie):
 class FastWiggler(Wiggler):
   '''Same as wiggler, but goes faster.'''
   def __init__(self, screen, pos, traj):
-    Wiggler.__init__(self, screen, pos, traj)
+    super(FastWiggler, self).__init__(screen, pos, traj)
     self.color = (255,127,127)
     self.speed = 2
     self.score = 400
@@ -346,7 +356,7 @@ class FastWiggler(Wiggler):
 class Homer(Baddie):
   '''A fast "bad guy" that follows the player.'''
   def __init__(self, screen, pos, traj):
-    Baddie.__init__(self, screen, (255,0,255), pos, traj, 5,
+    super(Homer, self).__init__(screen, (255,0,255), pos, traj, 5,
             ((2,0), (0,-1), (-2,0), (0,1)))
     self.speed = 2
 
@@ -356,9 +366,9 @@ class Homer(Baddie):
     Returns:
       Upgrade: The upgrade this returns on death.
     '''
-    return super()._calc_upgrade(BulletUpgrade=300,
-                                 SpeedUpgrade=100,
-                                 ShieldUpgrade=200)
+    return super(Homer, self)._calc_upgrade(BulletUpgrade=300,
+                                            SpeedUpgrade=100,
+                                            ShieldUpgrade=200)
 
   def tick(self):
     '''Perform one frame of action.'''
@@ -370,7 +380,7 @@ class Homer(Baddie):
 class Shooter(Baddie):
   FIRE_RATE = 4000
   def __init__(self, screen, pos, traj):
-    Baddie.__init__(self, screen, (255,0,127), pos, traj, 5,
+    super(Shooter, self).__init__(screen, (255,0,127), pos, traj, 5,
             ((1,0), (-1,-1), (-1,1)))
     self.speed = 2
     self.score = 200
@@ -383,9 +393,9 @@ class Shooter(Baddie):
     Returns:
       Upgrade: The upgrade this returns on death.
     '''
-    return super()._calc_upgrade(BulletUpgrade=100,
-                                 SpeedUpgrade=400,
-                                 ShieldUpgrade=200)
+    return super(Shooter, self)._calc_upgrade(BulletUpgrade=100,
+                                              SpeedUpgrade=400,
+                                              ShieldUpgrade=200)
 
   def _fire(self):
     self.last_fired = pygame.time.get_ticks()
@@ -1188,13 +1198,13 @@ class Main(object):
 
   # singleton enforcement ... and acts as a global variable
   MAIN_OBJECT = None
-  @staticmethod
-  def get_main(options=None):
-    if Main.MAIN_OBJECT is None:
-      Main.MAIN_OBJECT = Main(options)
+  @classmethod
+  def get_main(cls, options=None):
+    if cls.MAIN_OBJECT is None:
+      cls.MAIN_OBJECT = cls(options)
     elif options is not None:
-      assert len(args) > 0, "Main object already created and arguments passed!"
-    return Main.MAIN_OBJECT
+      assert len(args) > 0, "cls object already created and arguments passed!"
+    return cls.MAIN_OBJECT
 
 
 def parse_args():
