@@ -105,6 +105,10 @@ class Stats(object):
 
 
 class Positional(object):
+  '''Something that has a position on the screen.'''
+  def __init__(self):
+    assert False, "Shouldn't call Positional constructor."
+
   def move(self, *delta):
     '''Moves this element by the specified amount in the X and Y directions.
 
@@ -147,9 +151,10 @@ class Ship(Positional):
     self.pos = list(pos)
     self.traj = traj
     self.size = size
-    self.speed = 2  # really more like the max speed
+    self.speed = 2  # really more like the current max speed
+                    #                   (subject to upgrades)
 
-    # `rect ensures the `bbox` for this is calculated at most once per tick.
+    # `rect` ensures the `bbox` for this is calculated at most once per tick.
     self.rect = None   # i.e., not up-to-date
 
   def move_forward(self, amt=1.0):
@@ -169,7 +174,7 @@ class Ship(Positional):
     self.pos[1] += math.sin(self.traj) * speed
 
   def rotate(self, dt):
-    self.rect = None
+    self.rect = None  # Invalidate rect (will be recomputed).
     self.traj += dt
     while self.traj > 2 * math.pi:
       self.traj -= 2 * math.pi
@@ -186,9 +191,8 @@ class Ship(Positional):
   def _build_rect(self):
     if self.rect is None:
       ps = self._calc_global_ps()
-      self.rect = pygame.Rect(ps[0], (0, 0))
-      for p in ps[1:]:
-        self.rect.union_ip(pygame.Rect(p, (0, 0)))
+      self.rect = pygame.Rect(ps[0], (1, 1))
+      self.rect.unionall_ip([pygame.Rect(p, (1, 1)) for p in ps[1:]])
     return self.rect
 
   def center(self):
@@ -299,8 +303,13 @@ class Baddie(Ship):
     assert False, "Can't make instances of this class."
 
   def tick(self):
-    '''Perform one frame of action.'''
-    assert False, "Can't make instances of this class."
+    '''Perform one frame of action.  This method just throws an error.  You MUST
+    overwrite it.
+
+    Raises:
+      AssertionError: Always.  Overwrite this method.
+    '''
+    assert False, "Shouldn't make instances of this class."
 
   def _calc_upgrade(self, **kwargs):
     '''Calculates what upgrades to give based on `kwargs`.  Each argument name
@@ -347,6 +356,7 @@ class Wiggler(Baddie):
 class FastWiggler(Wiggler):
   '''Same as wiggler, but goes faster.'''
   def __init__(self, screen, pos, traj):
+    '''See Wiggler.__init__(...)'''
     super(FastWiggler, self).__init__(screen, pos, traj)
     self.color = (255,127,127)
     self.speed = 2
@@ -669,23 +679,38 @@ class Input(object):
 ################################################################################
 
 class CollisionSpace(object):
-  '''This is an implementation of sub-space partitioning collision
-  detection.'''
+  '''This is an implementation of sub-space partitioning collision detection.'''
 
-  BINSIZE = 50  # 1-D size of each sub-space (bin)
-  BUFSIZE = .2  # 1-D percentage of overlapping space
+  BINSIZE = 50
+  '''1-D size of each sub-space (bin).'''
+  BUFSIZE = .2
+  '''1-D percentage of overlapping space.'''
 
   def __init__(self, size, player):
-    self.size = self.width,self.height = size
+    '''Creates the collision space.
+
+    Args:
+      size, (int,int): Tuple defining width and height in px.
+      player, Player: The player.
+    '''
     self.player = player
-    self.cols = size[0] / self.BINSIZE
-    self.rows = size[1] / self.BINSIZE
     self.baddies = []
     self.bullets = []
+    self.set_screen_size(size)
+
+  def set_screen_size(self, size):
+    '''Sets (or re-sets) the size of the screen.
+
+    Args:
+      size, (int,int): Tuple defining width and height of the screen in px.
+    '''
+    self.size = self.width,self.height = size
+    self.cols = size[0] / self.BINSIZE
+    self.rows = size[1] / self.BINSIZE
 
   def empty(self):
-    while len(self.baddies) > 0: del self.baddies[0]
-    while len(self.bullets) > 0: del self.bullets[0]
+    while len(self.baddies) > 0: del self.baddies[-1]
+    while len(self.bullets) > 0: del self.bullets[-1]
 
   def _tick_baddie(self, baddie):
     buls = baddie.tick()
@@ -724,8 +749,8 @@ class CollisionSpace(object):
         self._tick_baddie(baddie)
       elif isinstance(baddie, Bullet):
         baddie.tick()
-        if baddie.pos[0] < 0 or baddie.pos[0] > self.width or \
-           baddie.pos[1] < 0 or baddie.pos[1] > self.height:
+        if baddie.pos[0] < 0 or baddie.pos[0] > self.width or (
+           baddie.pos[1] < 0 or baddie.pos[1] > self.height):
           del self.baddies[b]
         else:
           self._insert_baddie(baddie)
@@ -746,8 +771,8 @@ class CollisionSpace(object):
     for i,j in self._get_bins_idxs(self.player):
       for b in xrange(len(self.bins[i][j])-1,-1,-1):
         if self.bins[i][j][b].collides(self.player):
-          if isinstance(self.bins[i][j][b], Baddie) or \
-              isinstance(self.bins[i][j][b], Bullet):
+          if isinstance(self.bins[i][j][b], Baddie) or (
+             isinstance(self.bins[i][j][b], Bullet)):
             self.player.hit()
             self._remove_baddie(self.bins[i][j][b])
             break
@@ -1009,24 +1034,24 @@ class Main(object):
     self.fps_timer = pygame.time.Clock()
     self.fps = options.fps
     self.min_fps = options.min_fps
-    assert self.min_fps <= self.fps, "min FPS larger than FPS: %d > %d" % \
-        (self.min_fps, self.fps)
+    assert self.min_fps <= self.fps, "min FPS larger than FPS: %d > %d" % (
+        self.min_fps, self.fps)
 
     # fonts
     self.score_font = pygame.font.SysFont('courier', 25, bold = True)
     self.debug_font = pygame.font.SysFont('arial', 8)
     self.gameover_font = pygame.font.SysFont('arial', 18, bold = True)
     self.gameover_pos = self.gameover_font.size('GAME OVER')
-    self.gameover_pos = (self.width - self.gameover_pos[0]) / 2, \
-                        (self.height - self.gameover_pos[1]) / 2
+    self.gameover_pos = ((self.width - self.gameover_pos[0]) / 2,
+                         (self.height - self.gameover_pos[1]) / 2
     self.winner_font = pygame.font.SysFont('arial', 18, bold = True)
     self.winner_pos = self.winner_font.size('WINNER')
-    self.winner_pos = (self.width - self.winner_pos[0]) / 2, \
-                      (self.height - self.winner_pos[1]) / 2
+    self.winner_pos = ((self.width - self.winner_pos[0]) / 2,
+                       (self.height - self.winner_pos[1]) / 2
     self.pause_font = pygame.font.SysFont('arial', 18, bold = True)
     self.pause_pos = self.pause_font.size('Pause')
-    self.pause_pos = (self.width - self.pause_pos[0]) / 2, \
-                     (self.height - self.pause_pos[1]) / 2
+    self.pause_pos = ((self.width - self.pause_pos[0]) / 2,
+                      (self.height - self.pause_pos[1]) / 2
 
     self.space = CollisionSpace(self.size, self.player)
     self.user_input = Input(self.player, self.space)
@@ -1042,46 +1067,46 @@ class Main(object):
                 self.width, self.height, self.space.baddies) ]
 
     self.lev_i = 0
-    self.levels = [ Level(self.screen, self.size, self.spawn_points,
-                          "Level 1", [ (2e3, 0, Wiggler, 20),
-                                       (2e3, 1, Wiggler, 20),
-                                       (2e3, 2, Wiggler, 20),
-                                       (2e3, 3, Wiggler, 20) ]),
-                    Level(self.screen, self.size, self.spawn_points,
-                          "Level 2", [ (2e3, 0, FastWiggler, 20),
-                                       (2e3, 1, FastWiggler, 20),
-                                       (2e3, 2, FastWiggler, 20),
-                                       (2e3, 3, FastWiggler, 20) ]),
-                    Level(self.screen, self.size, self.spawn_points,
-                          "Level 3", [ (2e3, 0, Homer, 20),
-                                       (2e3, 1, Homer, 20),
-                                       (2e3, 2, Homer, 20),
-                                       (2e3, 3, Homer, 20) ]),
-                    Level(self.screen, self.size, self.spawn_points,
-                          "Level 4", [ (2e3, 0, Shooter, 20),
-                                       (2e3, 1, Shooter, 20),
-                                       (2e3, 2, Shooter, 20),
-                                       (2e3, 3, Shooter, 20) ]),
-                    Level(self.screen, self.size, self.spawn_points,
-                          "Level 5", [ (2e3, 0, Wiggler, 20),
-                                       (2e3, 1, Homer,   20),
-                                       (2e3, 2, Wiggler, 20),
-                                       (2e3, 3, Homer,   20),
-                                       (1e4, 1, Homer,   20),
-                                       (1e4, 2, Wiggler, 20),
-                                       (1e4, 1, Homer,   20),
-                                       (1e4, 2, Wiggler, 20) ]),
-                    Level(self.screen, self.size, self.spawn_points,
-                          "Level 6", [ (2e3, 0, Wiggler,     100),
-                                       (2e3, 1, Wiggler,     100),
-                                       (2e3, 2, Wiggler,     100),
-                                       (2e3, 3, Wiggler,     100),
-                                       (2e4, 2, Shooter,     100),
-                                       (2e4, 2, Shooter,     100),
-                                       (2e4, 2, Homer,       100),
-                                       (4e4, 3, Homer,       100),
-                                       (2e4, 2, FastWiggler, 100),
-                                       (4e4, 3, FastWiggler, 100) ]) ]
+    self.levels = [Level(self.screen, self.size, self.spawn_points,
+                         "Level 1", [(2e3, 0, Wiggler, 20),
+                                     (2e3, 1, Wiggler, 20),
+                                     (2e3, 2, Wiggler, 20),
+                                     (2e3, 3, Wiggler, 20)]),
+                   Level(self.screen, self.size, self.spawn_points,
+                         "Level 2", [(2e3, 0, FastWiggler, 20),
+                                     (2e3, 1, FastWiggler, 20),
+                                     (2e3, 2, FastWiggler, 20),
+                                     (2e3, 3, FastWiggler, 20)]),
+                   Level(self.screen, self.size, self.spawn_points,
+                         "Level 3", [(2e3, 0, Homer, 20),
+                                     (2e3, 1, Homer, 20),
+                                     (2e3, 2, Homer, 20),
+                                     (2e3, 3, Homer, 20)]),
+                   Level(self.screen, self.size, self.spawn_points,
+                         "Level 4", [(2e3, 0, Shooter, 20),
+                                     (2e3, 1, Shooter, 20),
+                                     (2e3, 2, Shooter, 20),
+                                     (2e3, 3, Shooter, 20)]),
+                   Level(self.screen, self.size, self.spawn_points,
+                         "Level 5", [(2e3, 0, Wiggler, 20),
+                                     (2e3, 1, Homer,   20),
+                                     (2e3, 2, Wiggler, 20),
+                                     (2e3, 3, Homer,   20),
+                                     (1e4, 1, Homer,   20),
+                                     (1e4, 2, Wiggler, 20),
+                                     (1e4, 1, Homer,   20),
+                                     (1e4, 2, Wiggler, 20)]),
+                   Level(self.screen, self.size, self.spawn_points,
+                         "Level 6", [(2e3, 0, Wiggler,     100),
+                                     (2e3, 1, Wiggler,     100),
+                                     (2e3, 2, Wiggler,     100),
+                                     (2e3, 3, Wiggler,     100),
+                                     (2e4, 2, Shooter,     100),
+                                     (2e4, 2, Shooter,     100),
+                                     (2e4, 2, Homer,       100),
+                                     (4e4, 3, Homer,       100),
+                                     (2e4, 2, FastWiggler, 100),
+                                     (4e4, 3, FastWiggler, 100)])]
 
   def tick(self):
     # Movement
